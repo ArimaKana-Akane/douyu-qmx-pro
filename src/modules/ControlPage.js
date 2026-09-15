@@ -14,6 +14,7 @@ import { FirstTimeNotice } from './FirstTimeNotice.js';
 import { StatsInfo } from './StatsInfo';
 import { DanmuPro } from './danmu/DanmuPro'; // 1. 添加静态导入
 import { RedBagTaskController } from '../features/redbag/RedBagTaskController.js';
+import { LotteryAutoRunner } from '../features/lottery/LotteryAutoRunner.js';
 import { DouyuLayoutAdapter } from '../platform/douyu/DouyuLayoutAdapter.js';
 import { GM_getValue, GM_setValue } from '$';
 
@@ -123,6 +124,11 @@ export const ControlPage = {
         }
         if (__ENABLE_DANMU_PRO__ && typeof newSettings.ENABLE_THEATER_COMPOSER !== 'undefined') {
             DanmuPro.refresh?.();
+        }
+
+        // 3. 自动抽奖开关（仅在控制页有意义）
+        if (typeof newSettings.LOTTERY_AUTO_ENABLED !== 'undefined') {
+            LotteryAutoRunner.setEnabled(newSettings.LOTTERY_AUTO_ENABLED === true);
         }
 
     },

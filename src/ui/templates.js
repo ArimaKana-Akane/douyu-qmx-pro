@@ -130,6 +130,14 @@ export const settingsPanelTemplate = (SETTINGS) => `
                         </select>
                     </div>
                 </div>
+                <div class="qmx-settings-item">
+                    <label>金币满 100 自动十连抽奖</label>
+                    <label class="qmx-toggle">
+                        <input type="checkbox" id="setting-lottery-auto" ${SETTINGS.LOTTERY_AUTO_ENABLED ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                    <p class="qmx-settings-hint">仅在控制页生效：每次检查金币，达到 100 时自动十连。默认关闭——抽奖会真实消耗金币。</p>
+                </div>
             </div>
         </div>
 

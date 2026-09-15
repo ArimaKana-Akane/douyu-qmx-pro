@@ -13,6 +13,7 @@ const USER_SETTING_KEYS = Object.freeze([
     'ROOM_PREWARM_DURATION',
     'DAILY_LIMIT_ACTION',
     'MODAL_DISPLAY_MODE',
+    'LOTTERY_AUTO_ENABLED',
 ]);
 
 const pickUserSettings = (value) => Object.fromEntries(

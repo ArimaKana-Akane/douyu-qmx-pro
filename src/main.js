@@ -4,6 +4,7 @@ import { SETTINGS } from './modules/SettingsManager'
 // 静态导入
 import { ControlPage } from './modules/ControlPage';
 import { DanmuPro } from './modules/danmu/DanmuPro';
+import { LotteryAutoRunner } from './features/lottery/LotteryAutoRunner';
 
 (function() {
     'use strict';
@@ -36,6 +37,16 @@ import { DanmuPro } from './modules/danmu/DanmuPro';
 
         if (isControlRoom) {
             ControlPage.init();
+            /**
+             * 自动抽奖只在**控制页**启动。
+             *
+             * 这一点是硬约束，不是优化：抽奖会真实消耗金币，而 `main()` 会在**每个**
+             * douyu.com 直播间页面运行。若不做控制页限定，用户同时开着 N 个直播间时
+             * 就会有 N 个实例各抽一次，金币被重复消耗。
+             *
+             * 另外 `isEnabled()` 默认 false —— 未经用户显式开启不会自动花钱。
+             */
+            if (LotteryAutoRunner.isEnabled()) LotteryAutoRunner.start();
             if (__ENABLE_DANMU_PRO__ && SETTINGS.ENABLE_DANMU_PRO) {
                 DanmuPro.init();
             }

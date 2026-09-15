@@ -15,6 +15,38 @@ const RED_BAG_ROOM_LIST_PATH = '/japi/livebiznc/web/anchorstardiscover/redbag/ro
 const RED_BAG_SNATCH_PATH = '/japi/livebiznc/web/anchorstardiscover/redbag/snatch';
 const CSRF_COOKIE_PATH = '/wgapi/livenc/liveweb/csrfApi/getCsrfCookie';
 
+// ── 新版活动（抽奖机）接口 ──────────────────────────────────────────────────
+// 2026-09-15 现网实测确认的契约（隔离 profile + 真实登录态 + 一次授权真实抽奖）。
+// 与旧 redbag/snatch 是并行的两套：旧接口仍可查询，新活动页走 lottery。
+const LOTTERY_INFO_PATH = '/japi/livebiznc/web/anchorstardiscover/user/lottery/info';
+const LOTTERY_DO_PATH = '/japi/livebiznc/web/anchorstardiscover/user/lottery/do';
+const LOTTERY_WIN_RECORD_PATH = '/japi/livebiznc/web/anchorstardiscover/user/lottery/my/winrecord';
+const RED_BAG_SQUARE_READ_PATH = '/japi/livebiznc/web/anchorstardiscover/redbag/square/read';
+const ACTIVITY_CONFIG_PATH = '/japi/livebiz/cdn/anchorstardiscover/config';
+
+/** 抽奖业务码：12022 = 金币不足（实测；活动页 bundle 中该分支会走「金币不足」提示） */
+export const LOTTERY_ERROR = Object.freeze({
+  COIN_NOT_ENOUGH: 12022,
+});
+
+/**
+ * CSRF 兜底候选（按实测可靠性排序）。
+ *
+ * 为什么需要兜底：新版斗鱼页面不再输出 `$SYS`，`getDynamicCsrf` 的
+ * 「解析页面配置」路径恒为空（2026-09-15 现网实测：控制室/活动页/任务中心 iframe
+ * 三种上下文的 `window.$SYS` 均为 undefined，服务端 HTML 里也没有该配置）。
+ *
+ * 实测依据：
+ *  - 活动页 bundle 内嵌 dev 配置为 `tn:"ctn", tvk:"ccn", cookie_pre:"acf_"`
+ *    → Cookie 名 = cookie_pre + tvk = `acf_ccn`
+ *  - 字段名：仅 `ctn` 通过；`csrf_test_name` / `csrf_cookie_name` / `token` / `csrfToken`
+ *    一律 403
+ *  - Cookie：`acf_ccn` 通过；同为 32 位 hex 的 `dy_did` / `acf_did` / `guid` 一律 403
+ */
+const CSRF_FALLBACK_CANDIDATES = Object.freeze([
+  { fieldName: 'ctn', cookieName: 'acf_ccn' },
+]);
+
 const mapWithConcurrency = async (items, concurrency, mapper) => {
   const results = new Array(items.length);
   let cursor = 0;
@@ -163,7 +195,43 @@ export const DouyuAPI = {
     }
 
     const { text, url } = await this.pageFetchText(`/${inputRoomId}`, { method: 'GET' });
-    const realRoomId = text.match(/window\.room_id\s*=\s*(\d+)/)?.[1] || '';
+
+    /**
+     * 解析真实 RID。
+     *
+     * 修复（2026-09-15）：新版斗鱼直播间页面**不再输出** `window.room_id`，
+     * 原有单一来源因此恒为空 → `resolveRoomIdentity` 抛错 →
+     * `SettingsPanel.save()` 在写设置之前就中止，**导致所有设置都无法保存**
+     * （现网实测：控制室 6657 页面 `/6657` 的 HTML 中无 `window.room_id`）。
+     *
+     * 因此改为多来源依次尝试，任一命中即可（按可靠性排序）：
+     *   1. `window.room_id = <数字>`（旧版页面）
+     *   2. `"room_id":<数字>` / `room_id = <数字>`（JSON 内嵌形式）
+     *   3. og:image 等资源 URL 里的 asrpic 路径：`/asrpic/<日期>/<真实RID>_src_...`
+     *      ——现网 6657 实测可稳定取到 `6979222`
+     *   4. og:url / canonical 里的数字路径
+     *
+     * 注意：这里的「真实 RID」是斗鱼内部房间号（可能不同于用户输入的靓号），
+     * 用于 wss 连接与活动接口，必须准确。
+     */
+    const pickRoomIdFromText = (html) => {
+      const patterns = [
+        /window\.room_id\s*=\s*["']?(\d+)/,
+        /"room_id"\s*:\s*["']?(\d+)/,
+        /room_id\s*=\s*["']?(\d+)/,
+        // 主播资源图路径：…/asrpic/<日期>/<真实RID>_src_…
+        // 日期实测为 6 位 yymmdd（如 260915），放宽到 6–8 位以防格式变化。
+        /\/asrpic\/\d{6,8}\/(\d+)_/,
+        /"rid"\s*:\s*["']?(\d+)/,
+      ];
+      for (const re of patterns) {
+        const hit = html.match(re)?.[1];
+        if (hit) return hit;
+      }
+      return '';
+    };
+
+    const realRoomId = pickRoomIdFromText(text);
     const canonicalTag = text.match(/<link\b[^>]*\brel=["'][^"']*canonical[^"']*["'][^>]*>/i)?.[0] || '';
     const canonicalUrl = canonicalTag.match(/\bhref=["']([^"']+)/i)?.[1] || '';
     const getPathRoomId = (value) => {
@@ -183,29 +251,102 @@ export const DouyuAPI = {
 
   async getDynamicCsrf() {
     const pageWindow = this.getPageWindow();
+
+    // ── 来源 1：页面内嵌配置（$SYS / 脚本内嵌） ───────────────────────────
+    // 注意：2026-09-15 现网实测，新版斗鱼页面**已不再输出** $SYS，
+    // 控制室、活动页、任务中心 iframe 三种上下文均为 undefined，
+    // 且服务端返回的 HTML 里也没有该配置（活动页仅 991 字节 SPA 壳）。
+    // 因此这条路径目前恒为空，保留是为了兼容旧版页面。
     const embedded = readEmbeddedCsrfConfig(pageWindow);
     if (isCompleteCsrfConfig(embedded)) {
       GM_setValue(CSRF_CONFIG_KEY, embedded);
-    }
-    const config = isCompleteCsrfConfig(embedded)
-      ? embedded
-      : GM_getValue(CSRF_CONFIG_KEY, {});
-    const fieldName = String(config?.fieldName || '');
-    const cookieName = String(config?.cookieName || '');
-    if (!fieldName || !cookieName) {
-      throw createRequestError('当前页及共享缓存中没有动态 CSRF 配置', 'auth');
+      const token = readDocumentCookie(pageWindow, embedded.cookieName);
+      if (token) return { fieldName: embedded.fieldName, token, source: 'embedded' };
     }
 
-    let token = readDocumentCookie(pageWindow, cookieName);
-    if (!token) {
+    // ── 来源 2：GM 缓存（跨页面/跨会话复用已解析结果） ─────────────────────
+    const cached = GM_getValue(CSRF_CONFIG_KEY, {});
+    if (isCompleteCsrfConfig(cached)) {
+      const token = readDocumentCookie(pageWindow, cached.cookieName);
+      if (token) return { fieldName: cached.fieldName, token, source: 'cache' };
+    }
+
+    // ── 来源 3：从 Cookie 反推（实测兜底，当前唯一可用路径） ───────────────
+    // 依据（2026-09-15 现网实测 + 活动页 bundle 静态分析）：
+    //   活动页配置常量 `tn:"ctn", tvk:"ccn", cookie_pre:"acf_"`（bundle 内嵌 dev 配置）
+    //   → Cookie 名 = cookie_pre + tvk = `acf_ccn`
+    //   实测：`acf_ccn` 是唯一 32 位 hex 且能被服务端接受的 CSRF token
+    //        （`dy_did` / `acf_did` / `guid` 同为 32 位 hex 但一律 403）
+    //        字段名仅 `ctn` 通过，`csrf_test_name`/`csrf_cookie_name`/`token`/`csrfToken` 均 403
+    // 这里把「已实测通过」的组合列为候选，逐个尝试；命中后写入缓存。
+    for (const candidate of CSRF_FALLBACK_CANDIDATES) {
+      const token = readDocumentCookie(pageWindow, candidate.cookieName);
+      if (!token) continue;
+      GM_setValue(CSRF_CONFIG_KEY, { fieldName: candidate.fieldName, cookieName: candidate.cookieName });
+      return { fieldName: candidate.fieldName, token, source: 'cookie-derive' };
+    }
+
+    // ── 来源 4：请求服务端补设 Cookie，再重新反推 ─────────────────────────
+    try {
       await this.pageFetchJson(CSRF_COOKIE_PATH, { method: 'GET' });
-      token = readDocumentCookie(pageWindow, cookieName);
-    }
-    if (!token) {
-      throw createRequestError('动态 CSRF Cookie 不可用', 'auth');
+    } catch { /* 端点不可用则继续 */ }
+    for (const candidate of CSRF_FALLBACK_CANDIDATES) {
+      const token = readDocumentCookie(pageWindow, candidate.cookieName);
+      if (!token) continue;
+      GM_setValue(CSRF_CONFIG_KEY, { fieldName: candidate.fieldName, cookieName: candidate.cookieName });
+      return { fieldName: candidate.fieldName, token, source: 'cookie-derive-after-fetch' };
     }
 
-    return { fieldName, token };
+    throw createRequestError(
+      'CSRF 配置不可用（页面未输出 $SYS，且 Cookie 中未找到已知的 CSRF token）',
+      'auth',
+    );
+  },
+
+  /** 清空缓存的 CSRF 配置，用于收到 403 后强制重新推导 */
+  invalidateCsrfConfig() {
+    try {
+      GM_setValue(CSRF_CONFIG_KEY, {});
+    } catch { /* 忽略 */ }
+  },
+
+  /**
+   * 带 CSRF 的 POST 请求（三个写接口共用）。
+   *
+   * 统一处理两件事：
+   *  1. CSRF 必须走 **form-urlencoded** —— 实测用 JSON body 或把字段放 header 一律 403；
+   *  2. 收到 **403 时清缓存并重试一次** —— 若站点轮换了 CSRF 字段名/Cookie 名，
+   *     第一次用旧缓存会 403，重试时 `getDynamicCsrf()` 会重新推导。
+   */
+  async postWithCsrf(path, buildParams, options = {}) {
+    const attempt = async () => {
+      const { fieldName, token } = await this.getDynamicCsrf();
+      const body = new URLSearchParams({ ...buildParams(), [fieldName]: token });
+      return this.pageFetchJson(path, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        },
+        body: body.toString(),
+        timeout: options.timeout,
+      });
+    };
+
+    try {
+      return await attempt();
+    } catch (error) {
+      // 403 且是 CSRF 相关 → 清缓存重试一次（应对字段名轮换）
+      const status = Number(error?.httpStatus);
+      const looksLikeCsrf = /csrf/i.test(String(error?.message || ''))
+        || /csrf/i.test(JSON.stringify(error?.payload || {}));
+      if (status === 403 || looksLikeCsrf) {
+        this.invalidateCsrfConfig();
+        Utils.log('[CSRF] 收到 403，已清缓存并重试一次（可能是字段名轮换）。');
+        return attempt();
+      }
+      throw error;
+    }
   },
 
   cachePageCsrfConfig() {
@@ -282,21 +423,130 @@ export const DouyuAPI = {
     if (!rid || !id || !code) {
       throw createRequestError('红包身份参数不完整', 'protocol');
     }
-    const { fieldName, token } = await this.getDynamicCsrf();
-    const body = new URLSearchParams({
+    return this.postWithCsrf(RED_BAG_SNATCH_PATH, () => ({
       code: String(code),
       id: String(id),
       rid: String(rid),
-      [fieldName]: token,
-    });
-    return this.pageFetchJson(RED_BAG_SNATCH_PATH, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json, text/plain, */*',
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-      },
-      body: body.toString(),
-    });
+    }));
+  },
+
+  // ── 新版活动：抽奖机 ────────────────────────────────────────────────────
+  /**
+   * 读取活动配置（含抽奖成本与保底阈值）。
+   *
+   * 实测（2026-09-15）返回结构：
+   *   data.treasureConfig.useGoldNum  —— 每次抽奖消耗的金币数（当前 10）
+   *   data.treasureConfig.hitTime     —— 保底阈值（当前 166，累计抽满即触发保底奖励）
+   *   data.treasureConfig.treasureRewards[] —— 奖励表（prob / guarantee / num）
+   *
+   * 该接口可匿名同源 GET，返回 error=0。
+   */
+  async getActivityConfig() {
+    const payload = await this.pageFetchJson(ACTIVITY_CONFIG_PATH, { method: 'GET' });
+    if (Number(payload?.error) !== 0 || !payload?.data) {
+      throw createRequestError(
+        String(payload?.msg || '活动配置响应结构异常'),
+        'protocol',
+        { businessError: payload?.error },
+      );
+    }
+    return payload.data;
+  },
+
+  /**
+   * 读取抽奖信息。
+   *
+   * 实测返回：
+   *   data.myCoin            —— 当前金币
+   *   data.remainLotteryNum  —— **距离保底的剩余次数**（不是可用抽奖次数；
+   *                             对应配置里的 treasureConfig.hitTime）
+   *   data.prizeList[]       —— 奖池（prizeDesc / prizeIdentity / prizeIcon / isStock）
+   */
+  async getLotteryInfo() {
+    const payload = await this.pageFetchJson(LOTTERY_INFO_PATH, { method: 'GET' });
+    if (Number(payload?.error) !== 0 || !payload?.data) {
+      throw createRequestError(
+        String(payload?.msg || '抽奖信息响应结构异常'),
+        'protocol',
+        { businessError: payload?.error },
+      );
+    }
+    return payload.data;
+  },
+
+  /** 读取我的中奖记录（data.prizeList[]：prizeDesc / prizeNum / prizeIcon / ts） */
+  async getLotteryWinRecords() {
+    const payload = await this.pageFetchJson(LOTTERY_WIN_RECORD_PATH, { method: 'GET' });
+    if (Number(payload?.error) !== 0 || !payload?.data) {
+      throw createRequestError(
+        String(payload?.msg || '中奖记录响应结构异常'),
+        'protocol',
+        { businessError: payload?.error },
+      );
+    }
+    return Array.isArray(payload.data.prizeList) ? payload.data.prizeList : [];
+  },
+
+  /**
+   * 执行抽奖。
+   *
+   * 实测契约（2026-09-15 真实抽奖验证，消耗 10 金币）：
+   *   POST /user/lottery/do?num=1      ← num 走 query string
+   *   Content-Type: x-www-form-urlencoded
+   *   body: rid=<rid>&<csrfFieldName>=<token>
+   *   响应: {error:0, msg:"success", data:{prizeList:[{prizeDesc, prizeNum, prizeIcon, ts, sort}]}}
+   *
+   * 注意：
+   *  - CSRF **必须走 form-urlencoded**；用 JSON body 会返回 403 csrf auth failed（实测）。
+   *  - num 最小为 1，传 0 会得到 {"error":1,"msg":"最小不能小于1"}。
+   *  - 金币不足返回 {"error":12022,"msg":"金币不足"}，**不会扣款**。
+   *
+   * @param {object} params
+   * @param {string} params.rid  活动房间号
+   * @param {number} [params.num=1] 抽奖次数（活动页单抽 1、十连 10）
+   * @returns {Promise<{prizeList: Array, raw: object}>}
+   */
+  async drawLottery({ rid, num = 1 } = {}) {
+    const count = Math.max(1, Math.floor(Number(num) || 1));
+    if (!rid) throw createRequestError('抽奖需要房间号', 'protocol');
+
+    const payload = await this.postWithCsrf(
+      `${LOTTERY_DO_PATH}?num=${count}`,
+      () => ({ rid: String(rid) }),
+    );
+
+    if (Number(payload?.error) !== 0) {
+      const code = Number(payload?.error);
+      throw createRequestError(
+        String(payload?.msg || '抽奖失败'),
+        code === LOTTERY_ERROR.COIN_NOT_ENOUGH ? 'business' : 'protocol',
+        { businessError: code },
+      );
+    }
+    return {
+      prizeList: Array.isArray(payload?.data?.prizeList) ? payload.data.prizeList : [],
+      raw: payload,
+    };
+  },
+
+  /**
+   * 标记候选红包已读（新版活动页调用）。
+   *
+   * 实测：该接口**只接受 form-urlencoded**，且必须带 rid + rbId + csrf 字段：
+   *   POST /redbag/square/read       body: rid=<rid>&rbId=<rbId>&<csrf>=<token>
+   *   → {"error":0,"msg":"success","data":1}
+   *
+   * 失败对照（均为实测）：
+   *   - 空 body / JSON body / 把 csrf 放 header → 403 csrf auth failed
+   *   - 缺 rid 或 rbId → {"error":1,"msg":"rid不为空rbId不为空"}
+   *   - GET          → {"error":1,"msg":"非法请求"}
+   */
+  async markSquareBagRead({ rid, rbId }) {
+    if (!rid || !rbId) throw createRequestError('标记已读需要 rid 与 rbId', 'protocol');
+    return this.postWithCsrf(RED_BAG_SQUARE_READ_PATH, () => ({
+      rid: String(rid),
+      rbId: String(rbId),
+    }));
   },
 
   /**

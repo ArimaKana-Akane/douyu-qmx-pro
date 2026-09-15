@@ -51,6 +51,46 @@ test('resolves one editable control room number to its hidden real RID', async (
     }
 });
 
+test('新版页面无 window.room_id 时仍能解析真实 RID（从 asrpic 路径兜底）', async () => {
+    const original = DouyuAPI.pageFetchText;
+    // 现网 6657 实测样本：无 window.room_id，真实 RID 只出现在 asrpic 资源路径里
+    DouyuAPI.pageFetchText = async () => ({
+        url: 'https://www.douyu.com/6657',
+        status: 200,
+        text: `
+            <link href="https://rpic.douyucdn.cn/asrpic/260915/6979222_src_1946.avif/dy4" as="image">
+            <link href="https://www.douyu.com/6657" rel="canonical">
+        `,
+    });
+    try {
+        assert.deepEqual(await DouyuAPI.resolveRoomIdentity('6657'), {
+            controlRoomId: '6657',
+            realRoomId: '6979222',
+        });
+    } finally {
+        DouyuAPI.pageFetchText = original;
+    }
+});
+
+test('旧版页面 window.room_id 仍优先解析', async () => {
+    const original = DouyuAPI.pageFetchText;
+    DouyuAPI.pageFetchText = async () => ({
+        url: 'https://www.douyu.com/6657',
+        status: 200,
+        text: `
+            <script>window.room_id = 6979222;</script>
+            <link href="https://rpic.douyucdn.cn/asrpic/260915/9999999_src_1946.avif" as="image">
+            <link href="https://www.douyu.com/6657" rel="canonical">
+        `,
+    });
+    try {
+        const result = await DouyuAPI.resolveRoomIdentity('6657');
+        assert.equal(result.realRoomId, '6979222', 'window.room_id 应优先于 asrpic 兜底');
+    } finally {
+        DouyuAPI.pageFetchText = original;
+    }
+});
+
 test('caches only dynamic csrf field mapping and never persists the token', async () => {
     storage.clear();
     globalThis.window.document = {
@@ -70,11 +110,41 @@ test('caches only dynamic csrf field mapping and never persists the token', asyn
         scripts: [{ textContent: 'window.__ROOM_DATA__={rid:12869007}' }],
         cookie: 'acf_ccn=control-token',
     };
-    assert.deepEqual(await DouyuAPI.getDynamicCsrf(), {
+    const csrf = await DouyuAPI.getDynamicCsrf();
+    assert.deepEqual({ fieldName: csrf.fieldName, token: csrf.token }, {
         fieldName: 'ctn',
         token: 'control-token',
     });
+    // source 是新增的诊断字段，标识本次取值来自哪条路径（embedded/cache/cookie-derive）
+    assert.ok(['embedded', 'cache', 'cookie-derive', 'cookie-derive-after-fetch'].includes(csrf.source));
+    // 关键安全断言：token 值绝不能落盘
     assert.equal(JSON.stringify([...storage.values()]).includes('control-token'), false);
+});
+
+test('页面无 $SYS 时从 Cookie 反推 CSRF（新版页面的唯一可用路径）', async () => {
+    storage.clear();
+    // 现网实况：页面不输出 $SYS，但登录会话里有 acf_ccn（32 位 hex）
+    const token = '10bc94a7bd1234567890abcdef123456';
+    globalThis.window.document = {
+        scripts: [{ textContent: 'window.__ROOM_DATA__={rid:6979222}' }],
+        cookie: `dy_did=aaa; acf_ccn=${token}; guid=bbb`,
+    };
+
+    const csrf = await DouyuAPI.getDynamicCsrf();
+    assert.equal(csrf.fieldName, 'ctn');
+    assert.equal(csrf.token, token);
+    assert.equal(csrf.source, 'cookie-derive', '应从 Cookie 反推得到');
+    // 反推结果会写入缓存供后续复用，但同样不得含 token
+    assert.equal(JSON.stringify([...storage.values()]).includes(token), false);
+});
+
+test('页面无 $SYS 且 Cookie 里没有已知 CSRF token 时明确报错', async () => {
+    storage.clear();
+    globalThis.window.document = {
+        scripts: [{ textContent: 'window.__ROOM_DATA__={rid:6979222}' }],
+        cookie: 'dy_did=aaa; guid=bbb',
+    };
+    await assert.rejects(() => DouyuAPI.getDynamicCsrf(), /CSRF 配置不可用/);
 });
 
 test('candidate rooms are ordered by active prize pool and failed probes remain as fallback', async () => {

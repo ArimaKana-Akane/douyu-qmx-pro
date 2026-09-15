@@ -400,3 +400,229 @@ User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36...
 | 2026-01-05 | 1.0 | 初始版本，记录查询和领取API |
 
 ---
+
+---
+
+## 4. 新版活动：抽奖机（2026-09-15 起）
+
+> **背景**：斗鱼已把全民星推荐红包改版为**抽奖机**（攒金币 → 抽奖）。
+> 旧的「抢红包池 + DOM 点击弹窗」路径**整体失效**——v2.0.9 的 10 个 DOM 选择器
+> 在当前页面命中数为 **0**（2026-09-15 现网实测）。
+> 新界面是独立 H5 活动页：`/pages/new-anchor-support/rank?rid=<rid>`，
+> 使用全新的 CSS Modules 类名（`Level-module__btn--NQJsM` 等）。
+>
+> 旧的 `redbag/square/list`、`redbag/room/list` 接口**仍然可用**，两套并存。
+
+### 4.1 活动配置（抽奖成本与保底）
+
+```http
+GET /japi/livebiz/cdn/anchorstardiscover/config
+```
+
+可匿名同源 GET。关键字段：
+
+| 字段 | 实测值 | 说明 |
+|---|---|---|
+| `data.treasureConfig.useGoldNum` | **10** | 每次抽奖消耗的金币数 |
+| `data.treasureConfig.hitTime` | **166** | **保底阈值**：累计抽满 166 次触发保底奖励 |
+| `data.treasureConfig.actId` | 126 | 活动 ID |
+| `data.treasureConfig.treasureRewards[]` | 12 项 | 奖励表（`prob` 概率 / `guarantee` 保底标记 / `num` 数量） |
+| `data.baseConfig.userRedPocketDayLimit` | 50 | 每日红包上限 |
+
+> ⚠️ **易错点**：`user/lottery/info` 返回的 `remainLotteryNum` **不是「可用抽奖次数」**，
+> 而是「**距离保底的剩余次数**」，与配置里的 `hitTime` 对应。
+> 实测：抽奖后该值从 161 → 160（抽 1 次减 1）。
+
+奖励表（`guarantee: 1` 为保底项）：
+
+| index | 奖励 | 数量 | 概率(万分) | guarantee |
+|---|---|---|---|---|
+| 1 | 弹幕皮肤 | 1 | 3000 | 0 |
+| 12 | 礼物横幅 | 1 | 3000 | 0 |
+| 2 | 星光棒 | 66 | 30000 | 0 |
+| 3 | 星光棒 | 500 | 5000 | 0 |
+| 4 | 鉴星官后缀 | 1 | 50000 | 0 |
+| 5 | 星光棒 | 100 | 25000 | 0 |
+| 6 | 鉴星官勋章 | 1 | 210000 | 0 |
+| 7 | 星光棒 | 50 | 50000 | 0 |
+| 11 | 头像框 | 1 | 150000 | 0 |
+| 8 | 星光棒 | 20 | 150000 | 0 |
+| **9** | **星光棒** | **10** | **274000** | **1 ← 保底项** |
+| 10 | 金币 | 5 | 50000 | 0 |
+
+### 4.2 抽奖信息与中奖记录
+
+```http
+GET /japi/livebiznc/web/anchorstardiscover/user/lottery/info
+GET /japi/livebiznc/web/anchorstardiscover/user/lottery/my/winrecord
+```
+
+`info` 响应（实测）：
+
+```json
+{ "error": 0, "msg": "success",
+  "data": { "myCoin": 48, "remainLotteryNum": 166, "prizeList": [ ... ] } }
+```
+
+`my/winrecord` 响应：`data.prizeList[]` 含 `prizeDesc` / `prizeNum` / `prizeIcon` / `ts`。
+
+### 4.3 执行抽奖
+
+```http
+POST /japi/livebiznc/web/anchorstardiscover/user/lottery/do?num=1
+Content-Type: application/x-www-form-urlencoded;charset=UTF-8
+
+rid=<rid>&<CSRF字段名>=<CSRF值>
+```
+
+**注意 `num` 走 query string，不在 body 里。**
+
+实测成功响应（2026-09-15，消耗 10 金币）：
+
+```json
+{ "error": 0, "msg": "success",
+  "data": { "prizeList": [
+    { "prizeDesc": "星光棒", "prizeNum": 20, "sort": 10,
+      "prizeIcon": "https://sta-op.douyucdn.cn/dygev/...",
+      "ts": 1789471743 } ] } }
+```
+
+错误码（实测）：
+
+| error | 含义 | 是否扣款 |
+|---|---|---|
+| 0 | 成功 | 是 |
+| 1 | 参数错误（`num` < 1 时为「最小不能小于1」） | 否 |
+| **12022** | **金币不足** | **否** |
+
+CSRF 要求：
+
+- **必须走 form-urlencoded**。实测用 JSON body 或把 csrf 放 header 均返回 `403 csrf auth failed`。
+- 字段名与 Cookie 名来自页面内嵌 `$SYS`：实测 `tn=ctn`、`tvk=ccn`、`cookie_pre=acf_`
+  → 实际 Cookie 名 `acf_ccn`（已存在于登录会话，通常无需再取）。
+- 若 Cookie 不存在，新活动页用的是 `/curl/csrfNlApi/getCsrfCookie`（注意：与旧
+  `snatch` 用的 `/wgapi/livenc/liveweb/csrfApi/getCsrfCookie` **不同**）。
+
+### 4.4 标记候选已读
+
+```http
+POST /japi/livebiznc/web/anchorstardiscover/redbag/square/read
+Content-Type: application/x-www-form-urlencoded;charset=UTF-8
+
+rid=<rid>&rbId=<rbId>&<CSRF字段名>=<CSRF值>
+```
+
+成功：`{"error":0,"msg":"success","data":1}`
+
+失败对照（均实测）：
+
+| 变体 | 结果 |
+|---|---|
+| 空 body / JSON body / csrf 放 header | `403 csrf auth failed` |
+| 缺 `rid` 或 `rbId` | `{"error":1,"msg":"rid不为空rbId不为空"}` |
+| GET | `{"error":1,"msg":"非法请求"}` |
+
+### 4.5 自动抽奖策略（本项目的实现）
+
+`src/features/lottery/LotteryAutoRunner.js`：
+
+- **仅控制页生效**——`main()` 会在每个 douyu.com 直播间页面运行，
+  若不做限定，N 个直播间标签页会各抽一次、重复消耗金币。
+- **默认关闭**——抽奖真实消耗金币，必须用户显式开启。
+- 阈值 **100 金币**（= 十连成本 `useGoldNum 10 × 10 次`），达到即十连。
+- 轮询间隔 60 秒（金币靠「用户任务」慢慢攒，实测每笔 +3/+10）。
+- 金币不足（12022）按「跳过」处理，不记为错误。
+- 单次调度最多抽一轮，绝不循环猛抽。
+
+---
+
+## 5. CSRF 解析：新版页面已移除 `$SYS`（2026-09-15 实测）
+
+### 5.1 问题
+
+脚本原有的 `getDynamicCsrf()` 依赖两级来源，**在现网两级全空**：
+
+| 来源 | 实测结果 |
+|---|---|
+| 页面内嵌配置（`window.$SYS`） | 控制室 / 活动页 / 任务中心 iframe **三种上下文均为 `undefined`** |
+| 服务端返回的 HTML | **不含**该配置（活动页仅 991 字节 SPA 壳） |
+| GM 缓存 | 空（因为从没成功解析过） |
+
+→ `getDynamicCsrf()` 抛「当前页及共享缓存中没有动态 CSRF 配置」
+→ **所有 POST 接口（`snatch` / `redbag/square/read` / `lottery/do`）全部无法调用**。
+
+这是「基础功能用不了」的直接原因。
+
+### 5.2 实测出来的正确参数
+
+用「哪些组合能通过」的方式逐个实测（403 = 该组合不对）：
+
+**字段名**（Cookie 固定用 `acf_ccn`）：
+
+| 字段名 | 结果 |
+|---|---|
+| **`ctn`** | ✅ **通过** |
+| `csrf_test_name` / `csrf_cookie_name` / `token` / `csrfToken` | ❌ 403 |
+
+**Cookie**（字段名固定 `ctn`）：
+
+| Cookie | 值形态 | 结果 |
+|---|---|---|
+| **`acf_ccn`** | 32 位 hex | ✅ **通过** |
+| `dy_did` / `acf_did` / `guid` | 同为 32 位 hex | ❌ 403 |
+
+> 注意最后一行：**同为 32 位 hex 的其他 Cookie 一律被拒**，
+> 所以不能靠「像 CSRF」来猜，必须用实测确认的那一个。
+
+这个组合也与活动页 bundle 里的内嵌 dev 配置一致：
+`tn:"ctn", tvk:"ccn", cookie_pre:"acf_"` → Cookie 名 = `cookie_pre + tvk` = `acf_ccn`。
+
+### 5.3 实现的降级顺序
+
+`DouyuAPI.getDynamicCsrf()` 现在按四级降级，并返回 `source` 标明实际来源：
+
+1. `embedded` — 页面内嵌配置（兼容旧版页面，现网恒空）
+2. `cache` — GM 缓存（跨页面/跨会话复用）
+3. `cookie-derive` — **从 Cookie 反推**（现网唯一可用路径）
+4. `cookie-derive-after-fetch` — 请求服务端补设 Cookie 后再反推
+
+另外新增 `postWithCsrf()` 统一三个写接口的 POST：
+CSRF 一律走 **form-urlencoded**（实测 JSON body / header 放字段一律 403），
+且 **403 时清缓存并重试一次**（应对字段名轮换）。
+
+---
+
+## 6. 领取链路实测：`snatch` 仍然可用（2026-09-15）
+
+**背景**：新版活动页是抽奖机，容易误判「旧的红包领取已下线」。实测证明**两套并存**。
+
+### 6.1 成功样本
+
+控制室 6657 发起，目标房间 `12892604`，红包 `id=1683745`，`waitSec=90`：
+
+| 时刻 | 结果 |
+|---|---|
+| +45s | `12006` 稍等会儿才能抢哟 |
+| **+90s** | **`error=0` success，领到金币 ×2** |
+
+金币流水确认：`12:12:16  +2  全民星推荐-红包`
+
+这与 `getSnatchAttemptOffsets()` 的既有策略（45s / 70s / 90s / 110s / 140s）**完全吻合**。
+
+### 6.2 对照实验：目标房间上下文是必需的
+
+同一红包、同样等到 +90s，但**不打开目标房间**：
+
+| 条件 | 结果 |
+|---|---|
+| 开目标房间上下文 + 等 waitSec | ✅ `error=0` |
+| **不开**目标房间 + 等 waitSec | ❌ 恒 `12006` |
+
+→ 证实 `PageLoader.openPrewarmTab()` 的「短时开页」是**必需环节**，不是冗余设计。
+（6.1 的样本中，我在控制室用同源 iframe 打开目标房间建立了上下文。）
+
+### 6.3 结论
+
+- **原有领取功能没有失效**，只是被 CSRF 解析失效阻断（§5）。
+- 旧 `snatch`（红包池）与新 `lottery/do`（抽奖机）**当前并存**。
+- `waitSec` 是「从本次响应时刻起再等 N 秒」，用它计时可行。

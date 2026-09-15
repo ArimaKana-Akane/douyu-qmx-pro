@@ -27,6 +27,12 @@ export const CONFIG = {
     BUTTON_POS_STORAGE_KEY: 'douyu_qmx_button_position', // 用于在油猴存储中记录主悬浮按钮位置的键名。
     MODAL_DISPLAY_MODE: 'floating', // 控制面板的显示模式。可选值: 'floating'(浮动窗口), 'centered'(屏幕居中), 'inject-rank-list'(注入到排行榜)。
 
+    // --- 自动抽奖（新版活动：抽奖机） ---
+    // 2026-09-15：斗鱼把全民星推荐红包改版为抽奖机，旧的 DOM 点击领取路径已失效。
+    // 开启后仅在控制页生效，金币达到 100（十连成本）时自动十连。
+    // 默认 false —— 抽奖会真实消耗金币，必须由用户显式开启。
+    LOTTERY_AUTO_ENABLED: false,
+
     // --- API 相关 ---
     API_URL: 'https://www.douyu.com/japi/livebiznc/web/anchorstardiscover/redbag/square/list', // 获取可领取红包直播间列表的官方API地址。
     COIN_LIST_URL: 'https://www.douyu.com/japi/livebiznc/web/anchorstardiscover/coin/record/list', // 获取金币历史的API地址

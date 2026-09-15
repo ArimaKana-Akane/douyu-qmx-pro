@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/modules/PageLoader.test.js src/modules/SettingsManager.test.js src/modules/GlobalState.test.js src/features/stats/ClaimEventStore.test.js src/features/redbag/RedBagState.test.js src/platform/douyu/CsrfConfig.test.js src/platform/douyu/DouyuLayoutAdapter.test.js src/utils/DouyuAPI.test.js",
+    "test": "node --test src/modules/PageLoader.test.js src/modules/SettingsManager.test.js src/modules/GlobalState.test.js src/features/stats/ClaimEventStore.test.js src/features/redbag/RedBagState.test.js src/features/lottery/LotteryAutoRunner.test.js src/platform/douyu/CsrfConfig.test.js src/platform/douyu/DouyuLayoutAdapter.test.js src/utils/DouyuAPI.test.js",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",

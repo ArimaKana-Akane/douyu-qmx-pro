@@ -66,6 +66,10 @@ export const SettingsPanel = {
             ),
             DAILY_LIMIT_ACTION: document.getElementById('setting-daily-limit-action').value,
             MODAL_DISPLAY_MODE: document.getElementById('setting-modal-mode').value,
+            // 自动抽奖开关（新版活动：抽奖机）。开关存在时以它为准。
+            ...(document.getElementById('setting-lottery-auto')
+                ? { LOTTERY_AUTO_ENABLED: document.getElementById('setting-lottery-auto').checked }
+                : {}),
 
             // 弹幕助手
             ...(__ENABLE_DANMU_PRO__ ? {

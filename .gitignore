@@ -9,9 +9,13 @@ lerna-debug.log*
 
 node_modules
 *.local
-src/test/
 temp
-test
+
+# 注意：不要在这里用宽泛的 `test` 或 `src/test/`。
+# 历史问题：原来的第 12/14 行分别是 `src/test/` 与 `test`，
+# 它们把 src/test/GmApiMock.js（单元测试的油猴 API mock）一并排除，
+# 而 8 个测试文件里有 5 个依赖它 → 该文件从未被提交，
+# 任何人克隆后跑 `npm test` 都是 5/13 失败。
 
 # IDE
 .DS_Store

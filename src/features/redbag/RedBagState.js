@@ -80,7 +80,17 @@ export const createRedBagBinding = (bag, receivedAt = Date.now()) => {
     };
 };
 
-/** 返回从工作直播间打开时刻起计算的五次领取尝试偏移。 */
+/**
+ * 返回从工作直播间打开时刻起计算的五次领取尝试偏移。
+ *
+ * 2026-09-15 现网实测验证（控制室 6657 发起、目标房间 12892604，waitSec=90）：
+ *   +45s → 12006「稍等会儿才能抢哟」
+ *   +90s → **error=0 success**，领到金币 ×2
+ * 即按 `receivedAt + waitSec` 计时可行，本函数首点（45s）与到点（90s）都与实测吻合。
+ *
+ * 对照组（同一红包、同样等到 +90s，但**不打开**目标房间上下文）：恒为 12006。
+ * → 证实「短时开页」是必需环节而非冗余设计（见 PageLoader）。
+ */
 export const getSnatchAttemptOffsets = (waitSec) => {
     const wait = Math.max(30, Math.round(asNumber(waitSec)));
     const first = Math.round(wait * (wait >= 300 ? 2 / 3 : 1 / 2));

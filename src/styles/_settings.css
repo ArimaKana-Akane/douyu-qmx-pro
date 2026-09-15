@@ -149,3 +149,12 @@
     background: color-mix(in srgb, var(--md-sys-color-primary) 9%, transparent);
     color: var(--md-sys-color-primary);
 }
+
+/* 自动抽奖开关的说明文字（新版活动：抽奖机）。
+   提示「仅在控制页生效 / 默认关闭 / 会真实消耗金币」，属于安全相关的必要说明。 */
+.qmx-settings-hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--md-sys-color-on-surface-variant, rgba(255, 255, 255, 0.66));
+}

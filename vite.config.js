@@ -6,24 +6,66 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig(() => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-    const buildFlavor = 'star-only';
+    // ── 构建维度 ────────────────────────────────────────────────────────────
+    // 修复（2026-09-15）：此前 buildFlavor 被硬编码为 'star-only'，
+    // 导致 BUILD_FLAVOR 环境变量被完全忽略 —— release.yml 里的 full / star-only /
+    // danmu-only 三种构建产出完全相同的内容，且因输出同名而互相覆盖。
+    // 现在恢复为从环境变量读取，并按 flavor 决定启用哪部分功能。
+    const buildFlavor = (process.env.BUILD_FLAVOR || 'full').trim(); // full | star-only | danmu-only
     const buildChannel = (process.env.BUILD_CHANNEL || 'beta').trim(); // beta | release
     const versionBase = (process.env.VERSION_SUFFIX || '2.1.0').trim();
-    const channelSuffix = buildChannel === 'beta' ? `-beta` : '';
+
+    if (!['full', 'star-only', 'danmu-only'].includes(buildFlavor)) {
+        throw new Error(`未知的 BUILD_FLAVOR: ${buildFlavor}（可选 full | star-only | danmu-only）`);
+    }
+
+    const channelSuffix = buildChannel === 'beta' ? '-beta' : '';
+    const flavorSuffix = buildFlavor === 'full' ? '' : `-${buildFlavor}`;
+    // beta 通道带 .1 后缀；release 通道使用纯版本号
     const metadataVersion = buildChannel === 'beta' ? `${versionBase}-beta.1` : versionBase;
-    const fileName = `星推荐v2${channelSuffix}.user.js`;
-    const scriptName = `斗鱼全民星推荐助手${channelSuffix}`;
-    const description = '斗鱼全民星推荐自动领取脚本 - 控制页服务端领取、收益统计与可视化任务面板';
+
+    // 文件名包含 flavor，避免三种 flavor 互相覆盖（原实现固定为 星推荐v2-beta.user.js）
+    const fileName = `星推荐v2${flavorSuffix}${channelSuffix}.user.js`;
+
+    let scriptName;
+    let description;
+    if (buildFlavor === 'danmu-only') {
+        scriptName = `斗鱼弹幕助手${channelSuffix}`;
+        description = '斗鱼弹幕智能补全助手 - 弹幕模板自动补全、全键盘操作';
+    } else if (buildFlavor === 'star-only') {
+        scriptName = `斗鱼全民星推荐助手${channelSuffix}`;
+        description = '斗鱼全民星推荐自动领取脚本 - 控制页服务端领取、收益统计与可视化任务面板';
+    } else {
+        scriptName = `斗鱼全民星推荐助手+弹幕助手${channelSuffix}`;
+        description = '斗鱼全民星推荐自动领取 + 弹幕智能助手 - 集成红包领取与弹幕补全的完整版';
+    }
+
+    const enableDanmu = buildFlavor !== 'star-only';
+    const enableStar = buildFlavor !== 'danmu-only';
 
     return {
         resolve: {
             alias: {
-                './modules/danmu/DanmuPro': path.resolve(__dirname, 'src/utils/empty.js'),
-                './danmu/DanmuPro': path.resolve(__dirname, 'src/utils/empty.js'),
+                // flexsearch 由 DanmukuDB 使用，仅弹幕侧需要。
+                ...(enableDanmu ? {
+                    flexsearch: path.resolve(__dirname, 'node_modules/flexsearch/dist/flexsearch.bundle.min.js'),
+                } : {}),
+                // star-only：把弹幕助手替换为空实现（可摇树移除）
+                ...(buildFlavor === 'star-only' ? {
+                    './modules/danmu/DanmuPro': path.resolve(__dirname, 'src/utils/empty.js'),
+                    './danmu/DanmuPro': path.resolve(__dirname, 'src/utils/empty.js'),
+                } : {}),
+                // danmu-only：把星推荐侧替换为空实现
+                ...(buildFlavor === 'danmu-only' ? {
+                    './modules/ControlPage': path.resolve(__dirname, 'src/utils/empty.js'),
+                    './modules/GlobalState': path.resolve(__dirname, 'src/utils/empty.js'),
+                } : {}),
             },
         },
         build: {
-            emptyOutDir: true,
+            // 重要：release.yml 会连续构建三种 flavor，必须保留彼此产物，
+            // 因此不能设为 true（否则后一次构建会清空前一次）。
+            emptyOutDir: false,
         },
         plugins: [
             monkey({
@@ -56,8 +98,8 @@ export default defineConfig(() => {
         define: {
             __BUILD_FLAVOR__: JSON.stringify(buildFlavor),
             __BUILD_CHANNEL__: JSON.stringify(buildChannel),
-            __ENABLE_DANMU_PRO__: 'false',
-            __ENABLE_STAR_CORE__: 'true',
+            __ENABLE_DANMU_PRO__: JSON.stringify(enableDanmu),
+            __ENABLE_STAR_CORE__: JSON.stringify(enableStar),
         },
     };
 });
