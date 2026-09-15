@@ -86,6 +86,10 @@ export default defineConfig(() => {
                     'run-at': 'document-idle',
                     license: 'MIT',
                     noframes: true,
+                    // 更新地址指向本 fork 的 Release 资产。
+                    // 用 ASCII 资产名，避免中文文件名在 URL 中被编码后取不到。
+                    updateURL: 'https://github.com/ArimaKana-Akane/douyu-qmx-pro/releases/latest/download/douyu-qmx-star.user.js',
+                    downloadURL: 'https://github.com/ArimaKana-Akane/douyu-qmx-pro/releases/latest/download/douyu-qmx-star.user.js',
                     $extra: [['original-author', 'ysl-ovo (https://greasyfork.org/zh-CN/users/1453821-ysl-ovo)']],
                 },
                 build: {
