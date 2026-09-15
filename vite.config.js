@@ -104,6 +104,8 @@ export default defineConfig(() => {
             __BUILD_CHANNEL__: JSON.stringify(buildChannel),
             __ENABLE_DANMU_PRO__: JSON.stringify(enableDanmu),
             __ENABLE_STAR_CORE__: JSON.stringify(enableStar),
+            // 与元数据头的 @version 同源，避免「关于」页显示与实际安装版本不一致。
+            __VERSION__: JSON.stringify(metadataVersion),
         },
     };
 });

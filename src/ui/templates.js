@@ -170,11 +170,12 @@ export const settingsPanelTemplate = (SETTINGS) => `
         <div id="tab-about" class="tab-content">
             <div class="qmx-about-identity">
                 <strong>全民星推荐助手</strong>
-                <span class="version-tag">v2.1.0 Beta</span>
+                <span class="version-tag">v${__VERSION__}</span>
             </div>
             <div class="qmx-about-links">
-                <a href="https://github.com/ienone/douyu-qmx-pro/" target="_blank" rel="noopener noreferrer">源码</a>
-                <a href="https://github.com/ienone/douyu-qmx-pro/issues" target="_blank" rel="noopener noreferrer">反馈</a>
+                <a href="https://github.com/ArimaKana-Akane/douyu-qmx-pro/" target="_blank" rel="noopener noreferrer">源码</a>
+                <a href="https://github.com/ArimaKana-Akane/douyu-qmx-pro/issues" target="_blank" rel="noopener noreferrer">反馈</a>
+                <a href="https://github.com/ienone/douyu-qmx-pro/" target="_blank" rel="noopener noreferrer">上游</a>
             </div>
         </div>
     </div>

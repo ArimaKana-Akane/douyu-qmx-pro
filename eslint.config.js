@@ -25,6 +25,8 @@ export default defineConfig([
                 __BUILD_CHANNEL__: 'readonly',
                 __ENABLE_DANMU_PRO__: 'readonly',
                 __ENABLE_STAR_CORE__: 'readonly',
+                // 构建期注入的版本号（vite define），供「关于」页显示。
+                __VERSION__: 'readonly',
 
             },
         },
