@@ -104,8 +104,9 @@ export const settingsPanelTemplate = (SETTINGS) => `
                     <input type="number" class="qmx-input" id="setting-control-room-id" value="${SETTINGS.CONTROL_ROOM_ID}">
                 </div>
                 <div class="qmx-settings-item">
-                    <label for="setting-prewarm-duration">后台页面停留时间（秒）</label>
-                    <input type="number" class="qmx-input" id="setting-prewarm-duration" min="0.5" max="15" step="0.5" value="${SETTINGS.ROOM_PREWARM_DURATION / 1000}">
+                    <label for="setting-prewarm-duration">后台页面最短停留（秒）</label>
+                    <input type="number" class="qmx-input" id="setting-prewarm-duration" min="12" max="30" step="1" value="${SETTINGS.ROOM_PREWARM_DURATION / 1000}">
+                    <p class="qmx-settings-hint">后台页会一直保持到本次领取有结果，不再中途关闭；此项只是安全下限，不得低于 12 秒（实测 8 秒仍领不到）。</p>
                 </div>
                 <div class="qmx-settings-item">
                     <label>达到上限后的行为</label>

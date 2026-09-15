@@ -5,6 +5,9 @@
 
 import { CONFIG } from '../utils/CONFIG';
 import { GM_deleteValue, GM_getValue, GM_setValue } from '$';
+import { MIN_PREWARM_MS } from './PageLoader';
+
+export { MIN_PREWARM_MS };
 
 const USER_SETTING_KEYS = Object.freeze([
     'CONTROL_ROOM_ID',
@@ -22,12 +25,23 @@ const pickUserSettings = (value) => Object.fromEntries(
         .map((key) => [key, value[key]]),
 );
 
+/**
+ * 后台页存活时长的**硬下限**（复用 PageLoader 的常量，避免两处定义漂移）。
+ *
+ * 2026-09-15 现网实测：低于 12 秒，目标房间的用户级活动上下文来不及建立，
+ * 关页后控制页的 snatch 恒返回 12006；12 秒起才能稳定成功。
+ * 因此这不是「用户偏好」而是功能正确性边界 —— 旧存档里的 3000 会被自动抬到 12000，
+ * 否则升级后旧用户依然无法领取。
+ */
+/** 上限：给慢网/慢机器留余量（原 15s 偏紧） */
+export const MAX_PREWARM_MS = 30_000;
+
 const normalizeUserSettings = (value) => {
     const settings = pickUserSettings(value);
     if (Object.hasOwn(settings, 'ROOM_PREWARM_DURATION')) {
         const duration = Number(settings.ROOM_PREWARM_DURATION);
         settings.ROOM_PREWARM_DURATION = Math.round(
-            Math.min(15_000, Math.max(500, Number.isFinite(duration) ? duration : 3_000))
+            Math.min(MAX_PREWARM_MS, Math.max(MIN_PREWARM_MS, Number.isFinite(duration) ? duration : MIN_PREWARM_MS))
         );
     }
     return settings;

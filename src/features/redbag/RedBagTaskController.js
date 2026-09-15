@@ -1,6 +1,6 @@
 import { SETTINGS } from '../../modules/SettingsManager';
 import { GlobalState } from '../../modules/GlobalState';
-import { PageLoader } from '../../modules/PageLoader';
+import { PageLoader, MIN_PREWARM_MS } from '../../modules/PageLoader';
 import { DouyuAPI } from '../../utils/DouyuAPI';
 import { Utils } from '../../utils/utils';
 import { ClaimEventStore } from '../stats/ClaimEventStore.js';
@@ -319,12 +319,27 @@ const processCandidate = async (task, candidate) => {
     try {
         task.prewarm = PageLoader.openPrewarmTab(candidate.url);
         const openedAt = task.prewarm.openedAt;
-        if (!await waitForTask(task, SETTINGS.ROOM_PREWARM_DURATION)) {
-            return { stop: true };
-        }
-        task.prewarm.close();
-        task.prewarm = null;
-        return await claimBoundBag(task, binding, openedAt);
+        /**
+         * 保持后台页打开，直到本次领取有定论（成功 / 派完 / 上限 / 鉴权失败 / 取消），
+         * 之后统一由 finally 关闭 —— 不再在中途用定时器猜关页时机。
+         *
+         * 2026-09-15 实测（同一账号、同一控制页、同样 waitSec=90 的红包，唯一变量是关页时机）：
+         *   3s（原默认）→ 12006；8s → 12006；12s → error=0 成功；**一直保持打开 → error=0 成功**
+         *
+         * 原「开 3 秒就关」是 v2.1.0 为降低内存占用引入的（对应上游 issue #46），
+         * 但它低于活动组件的就绪时间（上游研究记录：组件需 5.3~8.1 秒才渲染），属于必然失败。
+         *
+         * 改为「保持打开」的好处：行为不再依赖「关页后服务端上下文是否仍然有效」这个
+         * 未经验证的假设，也不再需要任何魔法时长。
+         */
+        const result = await claimBoundBag(task, binding, openedAt);
+
+        // 「最短停留」仅作安全下限（防止个别路径刚开就关）；正常领取耗时已远超它
+        const minOpenMs = Math.max(MIN_PREWARM_MS, Number(SETTINGS.ROOM_PREWARM_DURATION) || MIN_PREWARM_MS);
+        const remainMs = openedAt + minOpenMs - Date.now();
+        if (remainMs > 0) await waitForTask(task, remainMs);
+
+        return result;
     } catch (error) {
         recordTerminal(binding, 'open_failed', { reason: String(error?.message || error) });
         GlobalState.updateTask(candidate.roomId, 'ERROR', '短时开页失败', {

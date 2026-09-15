@@ -53,7 +53,7 @@ test('persists only supported settings and keeps room mapping metadata internal'
         CONTROL_ROOM_ID: '6657',
         TEMP_CONTROL_ROOM_RID: '6979222',
         CONTROL_ROOM_RESOLVED_FROM: '6657',
-        ROOM_PREWARM_DURATION: 7_000,
+        ROOM_PREWARM_DURATION: 15_000,
         ENABLE_DANMU_PRO: false,
         AUTO_PAUSE: true,
     });
@@ -62,12 +62,22 @@ test('persists only supported settings and keeps room mapping metadata internal'
         CONTROL_ROOM_ID: '6657',
         TEMP_CONTROL_ROOM_RID: '6979222',
         CONTROL_ROOM_RESOLVED_FROM: '6657',
-        ROOM_PREWARM_DURATION: 7_000,
+        ROOM_PREWARM_DURATION: 15_000,
     });
 });
 
 test('clamps the user-facing background page duration', () => {
+    // 上限放宽到 30s（原 15s 对慢网余量不足）
     SettingsManager.update({ ROOM_PREWARM_DURATION: 99_000 });
-    assert.equal(storage.get('douyu_qmx_user_settings').ROOM_PREWARM_DURATION, 15_000);
-    assert.equal(SETTINGS.ROOM_PREWARM_DURATION, 15_000);
+    assert.equal(storage.get('douyu_qmx_user_settings').ROOM_PREWARM_DURATION, 30_000);
+    assert.equal(SETTINGS.ROOM_PREWARM_DURATION, 30_000);
+});
+
+test('旧存档的 3 秒会被抬到 12 秒安全下限（否则升级后依然领不到）', () => {
+    // 2026-09-15 实测：后台页存活低于 12 秒时，关页后 snatch 恒返回 12006。
+    // 老用户的存档里是 3000，必须在读取时被抬起来，不能原样沿用。
+    storage.set('douyu_qmx_user_settings', { ROOM_PREWARM_DURATION: 3_000 });
+    SettingsManager.update({ ROOM_PREWARM_DURATION: 3_000 });
+    assert.equal(storage.get('douyu_qmx_user_settings').ROOM_PREWARM_DURATION, 12_000);
+    assert.equal(SETTINGS.ROOM_PREWARM_DURATION, 12_000);
 });

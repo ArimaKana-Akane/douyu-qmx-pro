@@ -61,8 +61,9 @@ export const SettingsPanel = {
         return {
             // 星推荐
             CONTROL_ROOM_ID: document.getElementById('setting-control-room-id').value,
+            // 后台页存活时长：硬下限 12 秒（实测低于此值关页后必失败），上限 30 秒。
             ROOM_PREWARM_DURATION: Math.round(
-                Math.min(15, Math.max(0.5, Number(document.getElementById('setting-prewarm-duration').value) || 3)) * 1000
+                Math.min(30, Math.max(12, Number(document.getElementById('setting-prewarm-duration').value) || 12)) * 1000
             ),
             DAILY_LIMIT_ACTION: document.getElementById('setting-daily-limit-action').value,
             MODAL_DISPLAY_MODE: document.getElementById('setting-modal-mode').value,
