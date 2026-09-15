@@ -17,6 +17,7 @@ const USER_SETTING_KEYS = Object.freeze([
     'DAILY_LIMIT_ACTION',
     'MODAL_DISPLAY_MODE',
     'LOTTERY_AUTO_ENABLED',
+    'LOTTERY_DRAW_THRESHOLD',
 ]);
 
 const pickUserSettings = (value) => Object.fromEntries(
@@ -36,6 +37,31 @@ const pickUserSettings = (value) => Object.fromEntries(
 /** 上限：给慢网/慢机器留余量（原 15s 偏紧） */
 export const MAX_PREWARM_MS = 30_000;
 
+/**
+ * 自动抽奖阈值的**硬下限** = 一次十连的成本（10 金币 × 10 次）。
+ *
+ * 为什么是硬边界而不是偏好：`LotteryAutoRunner` 达到阈值后调用的是
+ * `drawLottery({ num: 10 })`。若阈值低于 100，就会出现「金币已达标、
+ * 却因为不够十连而收到 12022 金币不足」——表现为**永远抽不动**。
+ * 因此 100 是功能正确性下限，用户只能往上调。
+ *
+ * 定位与 MIN_PREWARM_MS 同理：旧存档/手改配置里的 0、-1、50 一律抬到 100。
+ */
+export const MIN_LOTTERY_THRESHOLD = 100;
+
+/** 上限：仅用于挡住误输入的离谱值（如多敲几个零），不代表真实上限。 */
+export const MAX_LOTTERY_THRESHOLD = 100_000;
+
+const clampLotteryThreshold = (value) => {
+    const threshold = Number(value);
+    return Math.round(
+        Math.min(
+            MAX_LOTTERY_THRESHOLD,
+            Math.max(MIN_LOTTERY_THRESHOLD, Number.isFinite(threshold) ? threshold : MIN_LOTTERY_THRESHOLD)
+        )
+    );
+};
+
 const normalizeUserSettings = (value) => {
     const settings = pickUserSettings(value);
     if (Object.hasOwn(settings, 'ROOM_PREWARM_DURATION')) {
@@ -44,6 +70,9 @@ const normalizeUserSettings = (value) => {
             Math.min(MAX_PREWARM_MS, Math.max(MIN_PREWARM_MS, Number.isFinite(duration) ? duration : MIN_PREWARM_MS))
         );
     }
+    if (Object.hasOwn(settings, 'LOTTERY_DRAW_THRESHOLD')) {
+        settings.LOTTERY_DRAW_THRESHOLD = clampLotteryThreshold(settings.LOTTERY_DRAW_THRESHOLD);
+    }
     return settings;
 };
 
@@ -51,6 +80,9 @@ const normalizeRuntimePatch = (value) => {
     const settings = { ...(value || {}) };
     if (Object.hasOwn(settings, 'ROOM_PREWARM_DURATION')) {
         settings.ROOM_PREWARM_DURATION = normalizeUserSettings(settings).ROOM_PREWARM_DURATION;
+    }
+    if (Object.hasOwn(settings, 'LOTTERY_DRAW_THRESHOLD')) {
+        settings.LOTTERY_DRAW_THRESHOLD = clampLotteryThreshold(settings.LOTTERY_DRAW_THRESHOLD);
     }
     return settings;
 };

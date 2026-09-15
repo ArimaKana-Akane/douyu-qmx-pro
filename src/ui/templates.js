@@ -132,12 +132,17 @@ export const settingsPanelTemplate = (SETTINGS) => `
                     </div>
                 </div>
                 <div class="qmx-settings-item">
-                    <label>金币满 100 自动十连抽奖</label>
+                    <label>自动十连抽奖</label>
                     <label class="qmx-toggle">
                         <input type="checkbox" id="setting-lottery-auto" ${SETTINGS.LOTTERY_AUTO_ENABLED ? 'checked' : ''}>
                         <span class="slider"></span>
                     </label>
-                    <p class="qmx-settings-hint">仅在控制页生效：每次检查金币，达到 100 时自动十连。默认关闭——抽奖会真实消耗金币。</p>
+                    <p class="qmx-settings-hint">仅在控制页生效（避免多标签重复消耗金币）。默认关闭——抽奖会真实消耗金币。</p>
+                </div>
+                <div class="qmx-settings-item">
+                    <label for="setting-lottery-threshold">触发金币数</label>
+                    <input type="number" class="qmx-input" id="setting-lottery-threshold" min="100" max="100000" step="10" value="${SETTINGS.LOTTERY_DRAW_THRESHOLD}">
+                    <p class="qmx-settings-hint">金币达到此数时自动抽一次十连。十连固定消耗 100 金币，故不得低于 100；调高可攒更多再抽。开启后立即检查一次，之后每 60 秒检查。</p>
                 </div>
             </div>
         </div>

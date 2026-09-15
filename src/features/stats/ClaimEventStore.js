@@ -23,6 +23,44 @@ const getAttemptKey = (event) => {
     return String(event.id || `legacy-${event.timestamp}-${Math.random()}`);
 };
 
+/**
+ * 抽奖事件（新版活动：抽奖机）的 phase 标记。
+ *
+ * 必须与领取事件（`phase: 'claim'`）分开：领取的 `successRate` 是
+ * 「红包领取成功率」，抽奖的成败与它无关。若混在一起，
+ * 一次抽奖失败就会拉低领取成功率，统计口径被污染。
+ */
+export const LOTTERY_PHASE = 'lottery';
+
+/**
+ * 汇总抽奖事件。
+ *
+ * 与 `summarize()` 里领取部分的关键区别：这里**不做去重合并**。
+ * 领取一次红包会产生多条 `phase:'claim'` 事件（同一 bagKey 多次尝试），
+ * 所以领取要按 bagKey 归并成「一次尝试」；而抽奖是**每次一条独立事件**，
+ * 一次十连就是一次，不存在同一目标的重复尝试，归并反而会把两次抽奖算成一次。
+ */
+const summarizeLottery = (events) => {
+    const draws = events.filter((event) => event.phase === LOTTERY_PHASE);
+    const succeeded = draws.filter((event) => event.result === 'success');
+    const totals = succeeded.reduce((acc, event) => {
+        acc.coins += Number(event.rewards?.coins) || 0;
+        acc.starlight += Number(event.rewards?.starlight) || 0;
+        acc.spent += Number(event.cost) || 0;
+        acc.draws += Number(event.drawCount) || 0;
+        return acc;
+    }, { coins: 0, starlight: 0, spent: 0, draws: 0 });
+
+    return {
+        events: draws,
+        /** 抽奖**次数**（一次十连记 1 次），不是抽取的奖品数 */
+        count: draws.length,
+        success: succeeded.length,
+        failed: draws.length - succeeded.length,
+        ...totals,
+    };
+};
+
 export const ClaimEventStore = {
     record(event) {
         const payload = {
@@ -90,6 +128,8 @@ export const ClaimEventStore = {
             successRate: attempts ? Math.round((success / attempts) * 100) : 0,
             byResult,
             successBySource,
+            /** 抽奖统计（独立口径，不参与上面的领取成功率） */
+            lottery: summarizeLottery(events),
         };
     },
 };

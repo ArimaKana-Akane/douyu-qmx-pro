@@ -35,9 +35,19 @@ export const CONFIG = {
 
     // --- 自动抽奖（新版活动：抽奖机） ---
     // 2026-09-15：斗鱼把全民星推荐红包改版为抽奖机，旧的 DOM 点击领取路径已失效。
-    // 开启后仅在控制页生效，金币达到 100（十连成本）时自动十连。
+    // 开启后仅在控制页生效，金币达到阈值时自动十连。
     // 默认 false —— 抽奖会真实消耗金币，必须由用户显式开启。
     LOTTERY_AUTO_ENABLED: false,
+    /**
+     * 自动抽奖的金币阈值（用户可配置）。
+     *
+     * 语义：**金币 ≥ 该值时抽一次十连**（十连消耗 10 × 10 = 100 金币）。
+     * 因此该值不应低于 100，否则「够阈值却抽不动」——服务端会直接返回
+     * 12022「金币不足」。夹取逻辑见 SettingsManager.normalizeUserSettings。
+     *
+     * 为什么允许调高：抽奖是**真实消耗**，想多攒几次再抽的用户需要更大的值。
+     */
+    LOTTERY_DRAW_THRESHOLD: 100,
 
     // --- API 相关 ---
     API_URL: 'https://www.douyu.com/japi/livebiznc/web/anchorstardiscover/redbag/square/list', // 获取可领取红包直播间列表的官方API地址。

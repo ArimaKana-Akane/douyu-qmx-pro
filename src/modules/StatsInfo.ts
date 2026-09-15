@@ -28,12 +28,27 @@ type ClaimEvent = {
     rewards?: Partial<RewardTotals>;
     error?: number;
     attemptCount?: number;
+    /** 抽奖事件专用：本次消耗的金币 */
+    cost?: number;
+    /** 抽奖事件专用：本次抽取次数（十连 = 10） */
+    drawCount?: number;
+};
+type LotterySummary = {
+    events: ClaimEvent[];
+    count: number;
+    success: number;
+    failed: number;
+    coins: number;
+    starlight: number;
+    spent: number;
+    draws: number;
 };
 type ClaimSummary = {
     events: ClaimEvent[];
     success: number;
     successRate: number;
     attempts: number;
+    lottery?: LotterySummary;
 };
 
 const runtimeSettings = SETTINGS as RuntimeSettings;
@@ -49,6 +64,17 @@ const RESULT_META: Record<string, { label: string; tone: string }> = {
     daily_limit: { label: '达到上限', tone: 'idle' },
     risk_suspected: { label: '疑似风控', tone: 'error' },
     unknown: { label: '其他', tone: 'idle' },
+};
+
+/**
+ * 抽奖记录的状态文案。
+ *
+ * 与领取分开两套：抽奖的 `success` 显示「抽奖成功」而不是「领取成功」，
+ * 否则统计页里两种记录长得一样，无法区分。
+ */
+const LOTTERY_RESULT_META: Record<string, { label: string; tone: string }> = {
+    success: { label: '抽奖成功', tone: 'success' },
+    unknown: { label: '抽奖失败', tone: 'error' },
 };
 
 const EXCEPTION_LOG_RESULTS = new Set([
@@ -133,6 +159,20 @@ const getRewardText = (event: ClaimEvent) => {
     if (parts.length) return parts.join(' · ');
     if (event.rewardText) return event.rewardText;
     return '未记录奖励详情';
+};
+
+/**
+ * 抽奖记录的一行摘要：把**成本**也显示出来。
+ *
+ * 抽奖是支出行为（十连固定扣 100 金币），只显示「抽到星光棒 770」
+ * 会让人误以为这一笔是纯收入。用 `−100 → 星光棒 770` 的形式同时给出
+ * 成本与所得，收支关系一目了然。
+ */
+const getLotteryText = (event: ClaimEvent) => {
+    const cost = Number(event.cost) || 0;
+    const gained = getRewardText(event);
+    if (cost > 0) return `−${formatNumber(cost)} 金币 → ${gained}`;
+    return gained;
 };
 
 export const StatsInfo = {
@@ -242,21 +282,32 @@ export const StatsInfo = {
         if (!state.initialized) return;
         const summary = ClaimEventStore.summarize({ days: state.days }) as ClaimSummary;
         const history = getRewardHistory();
+        /**
+         * 领取事件（红包）与抽奖事件分流。
+         *
+         * **为什么必须分流**：`getRewardTotals()` 只按 `result === 'success'` 过滤，
+         * 不带 phase 判断。若把抽奖事件一起传进去，抽奖赢到的星光棒会被算进
+         * 「今日星光棒」，而这张卡原本的语义是「红包收益」；同时抽奖支出的 100 金币
+         * 也不在这个口径里，收支会显示成只有收入没有成本。
+         * 因此既有卡片一律只看领取事件，抽奖结果单独成卡。
+         */
+        const claimEvents = summary.events.filter((event) => event.phase !== 'lottery');
 
-        this.renderSummary(summary, history);
-        this.renderTrend(summary.events, history);
+        this.renderSummary(summary, history, claimEvents);
+        this.renderTrend(claimEvents, history);
         this.renderLogs(summary.events);
     },
 
-    renderSummary(summary: ClaimSummary, history: RewardHistory) {
+    renderSummary(summary: ClaimSummary, history: RewardHistory, claimEvents: ClaimEvent[]) {
         const container = document.getElementById('qmx-stats-summary');
         if (!container) return;
         const today = Utils.formatDateAsBeijing(new Date());
-        const todayEvents = summary.events.filter((event) => getEventDate(event) === today);
+        const todayEvents = claimEvents.filter((event) => getEventDate(event) === today);
         const localRewards = getRewardTotals(todayEvents);
         const accountReward = history[today] || { receivedCount: 0, total: 0, avg: 0 };
         const todayClaims = Math.max(getSuccessfulClaimCount(todayEvents), accountReward.receivedCount);
-        const cards = [
+        const lottery = summary.lottery;
+        const cards: Array<{ value: string | number; label: string; tone: string }> = [
             { value: todayClaims, label: '今日领取', tone: 'success' },
             { value: formatNumber(Math.max(accountReward.total, localRewards.coins)), label: '今日金币', tone: 'coin' },
             { value: formatNumber(localRewards.starlight), label: '今日星光棒', tone: 'starlight' },
@@ -266,6 +317,31 @@ export const StatsInfo = {
                 tone: summary.successRate >= 60 ? 'success' : 'warning',
             },
         ];
+        /**
+         * 抽奖两卡：次数与净收益。
+         *
+         * 用**抽奖次数**而不是奖品条目数：一次十连会返回多条 prizeList，
+         * 用条目数会显示成 10 次，与「抽了 1 次十连」的直觉不符。
+         *
+         * 净收益 = 抽到的星光棒 + 抽到的金币 − 消耗金币。抽奖是**支出**行为
+         * （十连固定扣 100 金币），只显示「抽到多少」会让人误以为全是收入，
+         * 因此必须把成本扣掉，负数说明这一轮亏了。
+         *
+         * 只在确实有抽奖记录时才追加：没有记录的账号不该看到两张 0 卡片。
+         */
+        if (lottery && lottery.count > 0) {
+            const net = lottery.starlight + lottery.coins - lottery.spent;
+            cards.push({
+                value: lottery.count,
+                label: state.period === 'weekly' ? '4周抽奖次数' : '7天抽奖次数',
+                tone: 'success',
+            });
+            cards.push({
+                value: `${net > 0 ? '+' : ''}${formatNumber(net)}`,
+                label: '抽奖净收益',
+                tone: net >= 0 ? 'coin' : 'warning',
+            });
+        }
         container.innerHTML = cards.map((card) => `
             <div class="qmx-stat-card" data-tone="${card.tone}">
                 <strong>${escapeHtml(card.value)}</strong>
@@ -327,24 +403,44 @@ export const StatsInfo = {
         const label = document.getElementById('qmx-stats-log-label');
         if (!container || !details || !count || !label) return;
         const claimEvents = events.filter((event) => event.phase === 'claim');
+        const lotteryEvents = events.filter((event) => event.phase === 'lottery');
+        /**
+         * 抽奖记录与领取记录一并展示（用户要求「把每次抽奖的结果也写入数据统计」）。
+         *
+         * 完整视图下两者混排按时间倒序，这样「领到钱 → 去抽奖」的因果链一眼可见；
+         * 异常视图下只保留失败抽奖 —— 成功抽奖不是异常，不该出现在异常列表里。
+         */
         const logs = state.logMode === 'exceptions'
-            ? claimEvents.filter((event) => EXCEPTION_LOG_RESULTS.has(event.result))
-            : claimEvents;
-        const hasExceptions = logs.some((event) => EXCEPTION_LOG_RESULTS.has(event.result));
+            ? [
+                ...claimEvents.filter((event) => EXCEPTION_LOG_RESULTS.has(event.result)),
+                ...lotteryEvents.filter((event) => event.result !== 'success'),
+            ].sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
+            : [...claimEvents, ...lotteryEvents]
+                .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+        const hasExceptions = logs.some((event) =>
+            event.phase === 'lottery'
+                ? event.result !== 'success'
+                : EXCEPTION_LOG_RESULTS.has(event.result)
+        );
         details.dataset.tone = hasExceptions ? 'warning' : 'stable';
-        label.textContent = state.logMode === 'exceptions' ? '异常记录' : '领取记录';
+        label.textContent = state.logMode === 'exceptions' ? '异常记录' : '领取与抽奖记录';
         count.textContent = String(logs.length);
         if (logs.length === 0) {
             container.innerHTML = '<div class="qmx-stats-empty"><i></i></div>';
             return;
         }
         container.innerHTML = logs.slice(0, 12).map((event) => {
-            const meta = RESULT_META[event.result] || RESULT_META.unknown;
-            const roomLabel = event.roomName
-                ? `${event.roomName}${event.roomId ? ` · ${event.roomId}` : ''}`
-                : event.roomId ? `房间 ${event.roomId}` : '未知直播间';
+            const isLottery = event.phase === 'lottery';
+            const meta = isLottery
+                ? (LOTTERY_RESULT_META[event.result] || LOTTERY_RESULT_META.unknown)
+                : (RESULT_META[event.result] || RESULT_META.unknown);
+            const roomLabel = isLottery
+                ? `抽奖机${event.roomId ? ` · ${event.roomId}` : ''}`
+                : event.roomName
+                    ? `${event.roomName}${event.roomId ? ` · ${event.roomId}` : ''}`
+                    : event.roomId ? `房间 ${event.roomId}` : '未知直播间';
             const context = event.result === 'success'
-                ? getRewardText(event)
+                ? (isLottery ? getLotteryText(event) : getRewardText(event))
                 : event.reason || meta.label;
             return `
                 <div class="qmx-timeline-row" data-tone="${meta.tone}">

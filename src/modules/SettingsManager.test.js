@@ -81,3 +81,40 @@ test('旧存档的 3 秒会被抬到 12 秒安全下限（否则升级后依然�
     assert.equal(storage.get('douyu_qmx_user_settings').ROOM_PREWARM_DURATION, 12_000);
     assert.equal(SETTINGS.ROOM_PREWARM_DURATION, 12_000);
 });
+
+// ── 自动抽奖阈值（2026-09-16 用户要求「阈值可配置」） ────────────────────
+
+test('抽奖阈值默认为 100（= 一次十连成本）', () => {
+    assert.equal(SETTINGS.LOTTERY_DRAW_THRESHOLD, 100);
+});
+
+test('抽奖阈值可调高并被持久化', () => {
+    SettingsManager.update({ LOTTERY_DRAW_THRESHOLD: 300 });
+    assert.equal(SETTINGS.LOTTERY_DRAW_THRESHOLD, 300);
+    assert.equal(storage.get('douyu_qmx_user_settings').LOTTERY_DRAW_THRESHOLD, 300);
+});
+
+test('低于十连成本的抽奖阈值被抬到 100（否则「够阈值却抽不动」）', () => {
+    // 若阈值允许为 50，金币 60 时会去抽十连 → 服务端 12022 金币不足，
+    // 表现为「永远抽不动」。因此 100 是硬下限，不是偏好。
+    SettingsManager.update({ LOTTERY_DRAW_THRESHOLD: 50 });
+    assert.equal(SETTINGS.LOTTERY_DRAW_THRESHOLD, 100);
+    assert.equal(storage.get('douyu_qmx_user_settings').LOTTERY_DRAW_THRESHOLD, 100);
+});
+
+test('负值 / 非数字 / 离谱大值的抽奖阈值都被夹到合法区间', () => {
+    SettingsManager.update({ LOTTERY_DRAW_THRESHOLD: -1 });
+    assert.equal(SETTINGS.LOTTERY_DRAW_THRESHOLD, 100);
+
+    SettingsManager.update({ LOTTERY_DRAW_THRESHOLD: 'abc' });
+    assert.equal(SETTINGS.LOTTERY_DRAW_THRESHOLD, 100, 'NaN 不应污染配置');
+
+    SettingsManager.update({ LOTTERY_DRAW_THRESHOLD: 9_999_999 });
+    assert.equal(SETTINGS.LOTTERY_DRAW_THRESHOLD, 100_000, '上限 10 万，挡住多敲零');
+});
+
+test('旧存档没有阈值字段时回落到 CONFIG 默认值', () => {
+    storage.set('douyu_qmx_user_settings', { CONTROL_ROOM_ID: '6657' });
+    // 存档里没有该键 → get() 合并 CONFIG 默认值 100
+    assert.equal(SettingsManager.get().LOTTERY_DRAW_THRESHOLD, 100);
+});

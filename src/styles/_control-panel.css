@@ -863,7 +863,9 @@
 
 .qmx-stats-summary {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* 自适应列数：抽奖卡片是按需追加的（无抽奖记录时不显示），
+       写死 4 列会让 5~6 张卡时出现空位或换行不齐。 */
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
     gap: 7px;
 }
 

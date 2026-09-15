@@ -71,6 +71,15 @@ export const SettingsPanel = {
             ...(document.getElementById('setting-lottery-auto')
                 ? { LOTTERY_AUTO_ENABLED: document.getElementById('setting-lottery-auto').checked }
                 : {}),
+            // 自动抽奖阈值：硬下限 100（= 十连成本）。低于它会出现「够阈值却抽不动」，
+            // 服务端恒返回 12022 金币不足，因此这里与 SettingsManager 各夹一次。
+            ...(document.getElementById('setting-lottery-threshold')
+                ? {
+                    LOTTERY_DRAW_THRESHOLD: Math.round(
+                        Math.min(100000, Math.max(100, Number(document.getElementById('setting-lottery-threshold').value) || 100))
+                    ),
+                }
+                : {}),
 
             // 弹幕助手
             ...(__ENABLE_DANMU_PRO__ ? {

@@ -111,3 +111,103 @@ test('自动抽奖默认关闭；开关可持久化', () => {
 test('十连成本常量与用户要求一致（100 金币）', () => {
     assert.equal(TEN_DRAW_COST, 100);
 });
+
+// ── 可配置阈值（2026-09-16 用户要求「阈值可配置」） ──────────────────────
+
+test('阈值可调高：金币未达到自定义阈值时不抽奖', async () => {
+    const { SETTINGS } = await import('../../modules/SettingsManager.js');
+    const original = SETTINGS.LOTTERY_DRAW_THRESHOLD;
+    SETTINGS.LOTTERY_DRAW_THRESHOLD = 500;
+    try {
+        let drawCalled = 0;
+        const result = await withApi({
+            getLotteryInfo: async () => ({ myCoin: 300, remainLotteryNum: 160 }),
+            drawLottery: async () => { drawCalled += 1; return { prizeList: [] }; },
+        }, () => LotteryAutoRunner.tick());
+
+        assert.equal(result.action, 'skipped', '300 < 500 应跳过');
+        assert.match(result.reason, /300\/500/, '提示里应出现自定义阈值');
+        assert.equal(drawCalled, 0);
+    } finally {
+        SETTINGS.LOTTERY_DRAW_THRESHOLD = original;
+    }
+});
+
+test('阈值可调高：金币达到自定义阈值时抽奖', async () => {
+    const { SETTINGS } = await import('../../modules/SettingsManager.js');
+    const original = SETTINGS.LOTTERY_DRAW_THRESHOLD;
+    SETTINGS.LOTTERY_DRAW_THRESHOLD = 500;
+    try {
+        let requested = null;
+        const result = await withApi({
+            getLotteryInfo: async () => ({ myCoin: 520, remainLotteryNum: 160 }),
+            drawLottery: async (params) => { requested = params; return { prizeList: [] }; },
+        }, () => LotteryAutoRunner.tick());
+
+        assert.equal(result.action, 'drawn', '520 ≥ 500 应抽奖');
+        assert.equal(requested.num, 10, '抽的仍是十连');
+    } finally {
+        SETTINGS.LOTTERY_DRAW_THRESHOLD = original;
+    }
+});
+
+test('阈值低于十连成本时被抬到 100（否则「够阈值却抽不动」）', async () => {
+    const { SETTINGS } = await import('../../modules/SettingsManager.js');
+    const original = SETTINGS.LOTTERY_DRAW_THRESHOLD;
+    SETTINGS.LOTTERY_DRAW_THRESHOLD = 10;   // 模拟手改配置写坏
+    try {
+        let drawCalled = 0;
+        const result = await withApi({
+            getLotteryInfo: async () => ({ myCoin: 50, remainLotteryNum: 160 }),
+            drawLottery: async () => { drawCalled += 1; return { prizeList: [] }; },
+        }, () => LotteryAutoRunner.tick());
+
+        // 50 金币若按 10 的坏阈值会去抽十连 → 服务端 12022 恒失败。
+        // 抬到 100 后应当是「跳过」，不产生无意义请求。
+        assert.equal(result.action, 'skipped');
+        assert.match(result.reason, /50\/100/, '阈值应被抬到 100');
+        assert.equal(drawCalled, 0, '不应发出必然失败的十连请求');
+    } finally {
+        SETTINGS.LOTTERY_DRAW_THRESHOLD = original;
+    }
+});
+
+test('阈值写入抽奖状态，供 UI 排查「为什么没抽」', async () => {
+    const { SETTINGS } = await import('../../modules/SettingsManager.js');
+    const original = SETTINGS.LOTTERY_DRAW_THRESHOLD;
+    SETTINGS.LOTTERY_DRAW_THRESHOLD = 200;
+    try {
+        await withApi({
+            getLotteryInfo: async () => ({ myCoin: 120, remainLotteryNum: 160 }),
+            drawLottery: async () => ({ prizeList: [] }),
+        }, () => LotteryAutoRunner.tick());
+
+        const state = LotteryAutoRunner.getState();
+        assert.equal(state.myCoin, 120);
+        assert.equal(state.threshold, 200, '状态里应记录本次判定用的阈值');
+    } finally {
+        SETTINGS.LOTTERY_DRAW_THRESHOLD = original;
+    }
+});
+
+test('start() 立即检查一次，不等第一个轮询周期', async () => {
+    storage.clear();
+    storage.set('douyu_qmx_lottery_auto_enabled', true);
+
+    let infoCalls = 0;
+    const originalGetInfo = DouyuAPI.getLotteryInfo;
+    const originalDraw = DouyuAPI.drawLottery;
+    DouyuAPI.getLotteryInfo = async () => { infoCalls += 1; return { myCoin: 0, remainLotteryNum: 0 }; };
+    DouyuAPI.drawLottery = async () => ({ prizeList: [] });
+    try {
+        LotteryAutoRunner.setEnabled(true);      // 内部会调用 start()
+        // 立即执行是同步发起的，给一轮 microtask + 宏任务让 tick 完成
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.ok(infoCalls >= 1, `开启后应立即检查一次（实际 ${infoCalls} 次）`);
+    } finally {
+        LotteryAutoRunner.stop();
+        LotteryAutoRunner.setEnabled(false);
+        DouyuAPI.getLotteryInfo = originalGetInfo;
+        DouyuAPI.drawLottery = originalDraw;
+    }
+});
