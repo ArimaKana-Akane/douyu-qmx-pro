@@ -12,7 +12,7 @@ import { GM_getValue, GM_setValue } from '$';
 export const FirstTimeNotice = {
     /** 仅在首次打开控制室时显示一次。 */
     showFirstUseNotice() {
-        const NOTICE_SHOWN_KEY = 'douyu_qmx_first_use_notice_v2_1_shown';
+        const NOTICE_SHOWN_KEY = 'douyu_qmx_first_use_notice_v2_1_4_shown';
         const hasShownNotice = GM_getValue(NOTICE_SHOWN_KEY, false);
         
         if (!hasShownNotice) {
@@ -28,7 +28,7 @@ export const FirstTimeNotice = {
                     <h4 style="color: var(--status-color-success, #4CAF50); margin-top: 0;">星推荐领取方式</h4>
                     <p>领取任务由控制页统一执行，工作直播间只用于获取必要信息，不需要持续保留：</p>
                     <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>脚本会在后台短暂打开候选直播间，完成初始化后自动关闭</li>
+                        <li>脚本会在后台打开候选直播间，并保持到本次领取有结论后才关闭</li>
                         <li>控制页根据红包等待时长安排最多 5 次领取请求</li>
                         <li>红包是否可领以斗鱼接口响应为准，不依赖页面倒计时和模拟点击</li>
                     </ul>
@@ -41,7 +41,7 @@ export const FirstTimeNotice = {
                     </ul>
 
                     <h4 style="margin-bottom: 5px;">⭐️点点star吧~</h4>
-                    <p style="margin-top: 5px;">项目地址：<a href="https://github.com/ienone/douyu-qmx-pro" target="_blank" rel="noopener noreferrer" style="color: var(--accent-color, #ff6b6b);">douyu-qmx-pro</a>，觉得好用请给个star🌟~~</p>
+                    <p style="margin-top: 5px;">项目地址：<a href="https://github.com/ArimaKana-Akane/douyu-qmx-pro" target="_blank" rel="noopener noreferrer" style="color: var(--accent-color, #ff6b6b);">douyu-qmx-pro</a>，觉得好用请给个star🌟~~</p>
                 </div>
                 <div class="qmx-modal-footer">
                     <button id="qmx-notice-settings-btn" class="qmx-modal-btn">前往设置</button>
