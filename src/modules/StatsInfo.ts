@@ -43,12 +43,20 @@ type LotterySummary = {
     spent: number;
     draws: number;
 };
+/** 星光棒总计（领取 + 抽奖），由 ClaimEventStore.summarizeStarlight 计算 */
+type StarlightSummary = {
+    total: number;
+    fromClaim: number;
+    fromLottery: number;
+};
 type ClaimSummary = {
     events: ClaimEvent[];
     success: number;
     successRate: number;
     attempts: number;
     lottery?: LotterySummary;
+    /** 星光棒总计（领取 + 抽奖） */
+    starlight?: StarlightSummary;
 };
 
 const runtimeSettings = SETTINGS as RuntimeSettings;
@@ -311,6 +319,23 @@ export const StatsInfo = {
             { value: todayClaims, label: '今日领取', tone: 'success' },
             { value: formatNumber(Math.max(accountReward.total, localRewards.coins)), label: '今日金币', tone: 'coin' },
             { value: formatNumber(localRewards.starlight), label: '今日星光棒', tone: 'starlight' },
+            {
+                /**
+                 * 星光棒**总计** = 领取所得 + 抽奖所得。
+                 *
+                 * 这两笔原本分散在不同卡里（「今日星光棒」只含领取；抽奖所得混在
+                 * 「抽奖净收益」的金币口径里），看不出真实的星光棒收入。
+                 *
+                 * 汇总口径由 ClaimEventStore 提供（可单测），这里只负责展示 ——
+                 * 过滤规则散在 UI 层正是历史上口径污染的原因。
+                 *
+                 * 注意：**不扣抽奖成本**。成本扣的是金币，与星光棒不是同一种货币，
+                 * 从星光棒总量里减金币没有意义。要看收支关系看「抽奖净收益」。
+                 */
+                value: formatNumber(summary.starlight?.total || 0),
+                label: state.period === 'weekly' ? '4周星光棒总计' : '7天星光棒总计',
+                tone: 'starlight',
+            },
             {
                 value: `${summary.successRate}%`,
                 label: state.period === 'weekly' ? '4周成功率' : '7天成功率',

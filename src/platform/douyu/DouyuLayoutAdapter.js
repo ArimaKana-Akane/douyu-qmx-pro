@@ -58,6 +58,46 @@ export const DouyuLayoutAdapter = {
         return Boolean(this.getPlayerMain() && this.getChatComposer());
     },
 
+    /**
+     * 是否处于「网页全屏」或浏览器全屏。
+     *
+     * 为什么要多重判据，而不是只查一个类名：
+     * 斗鱼的全屏类名在改版时变过 —— `InputDetector` 的注释明确记着
+     * 「新版网页全屏仍使用右侧 ChatSend 输入区，因此不再依赖带构建哈希的
+     * 全屏类名」。只认 `is-fullScreenPage` 一旦失效就会静默返回 false，
+     * 表现为「全屏后插件该隐藏却没隐藏」，且不会有任何报错。
+     *
+     * 已排除的判据：不能用 `document.fullscreenElement` 代替本方法 ——
+     * 斗鱼的「网页全屏」是它自己改布局（不调用 Fullscreen API），
+     * 而 F11 全屏属于浏览器行为；两者事件不同，故分开判断。
+     */
+    isWebFullscreen() {
+        return Boolean(document.body?.classList?.contains?.('is-fullScreenPage'));
+    },
+
+    /**
+     * 浏览器全屏（F11 / Fullscreen API）。与斗鱼「网页全屏」是两回事。
+     *
+     * `matchMedia` 的结果缓存在实例上：MediaQueryList 每次调用都会新建对象，
+     * 而本方法会被 1 秒轮询反复调用。DOM 的类名变化无法被 matchMedia 感知，
+     * 但 display-mode 只在浏览器自身全屏状态变化时改变 —— 而那同时必然
+     * 触发 `fullscreenchange`，所以缓存不会导致状态过期。
+     */
+    isBrowserFullscreen() {
+        if (document.fullscreenElement || document.webkitFullscreenElement) return true;
+        if (this._displayModeQuery === undefined) {
+            this._displayModeQuery = typeof window.matchMedia === 'function'
+                ? window.matchMedia('(display-mode: fullscreen)')
+                : null;
+        }
+        return Boolean(this._displayModeQuery?.matches);
+    },
+
+    /** 任一全屏形态。用于决定插件 UI 是否让位。 */
+    isFullscreen() {
+        return this.isWebFullscreen() || this.isBrowserFullscreen();
+    },
+
     getSnapshot() {
         const composer = this.getChatComposer();
         return {

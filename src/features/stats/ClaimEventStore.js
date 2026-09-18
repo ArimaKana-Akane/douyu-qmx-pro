@@ -61,6 +61,38 @@ const summarizeLottery = (events) => {
     };
 };
 
+/**
+ * 星光棒总计：**领取所得 + 抽奖所得**。
+ *
+ * 为什么单独汇总，而不是在 UI 里把两张卡的数相加：
+ * 领取侧的成功事件需要按「成功」过滤后再累加，抽奖侧还要区分 phase，
+ * 这套过滤规则如果散在 UI 层，任何一处漏掉 phase 判断就会把两类数字
+ * 混在一起（这正是历史上出现过的口径污染）。放在这里只有一个来源，
+ * 且可被单测覆盖 —— `StatsInfo.ts` 依赖 DOM，无法测试。
+ *
+ * 口径约定：
+ * - 只统计 `result === "success"` 的事件（失败的领取/抽奖没有星光棒入账）；
+ * - **不扣抽奖成本**：抽奖消耗的是金币，与星光棒不是同一种货币，
+ *   从星光棒总量里减去金币没有意义。需要看收支关系看 `lottery.spent` 与净收益。
+ *
+ * @param {Array} events 已按时间范围过滤过的事件列表
+ * @returns {{ total: number, fromClaim: number, fromLottery: number }}
+ */
+const summarizeStarlight = (events) => {
+    const starlightOf = (event) => {
+        const value = Number(event.rewards?.starlight);
+        return Number.isFinite(value) ? value : 0;
+    };
+    const succeeded = events.filter((event) => event.result === 'success');
+    const fromClaim = succeeded
+        .filter((event) => event.phase !== LOTTERY_PHASE)
+        .reduce((sum, event) => sum + starlightOf(event), 0);
+    const fromLottery = succeeded
+        .filter((event) => event.phase === LOTTERY_PHASE)
+        .reduce((sum, event) => sum + starlightOf(event), 0);
+    return { total: fromClaim + fromLottery, fromClaim, fromLottery };
+};
+
 export const ClaimEventStore = {
     record(event) {
         const payload = {
@@ -130,6 +162,8 @@ export const ClaimEventStore = {
             successBySource,
             /** 抽奖统计（独立口径，不参与上面的领取成功率） */
             lottery: summarizeLottery(events),
+            /** 星光棒总计（领取 + 抽奖），口径见 summarizeStarlight */
+            starlight: summarizeStarlight(events),
         };
     },
 };

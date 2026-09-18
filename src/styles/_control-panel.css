@@ -1204,3 +1204,16 @@
 .qmx-tab-header.show-id .qmx-tab-room-id {
     pointer-events: auto !important; /* 显示时可点击 */
 }
+
+/* ── 全屏让位（2026-09-18）───────────────────────────────────────────────
+   斗鱼「网页全屏」时隐藏插件 UI，退出后恢复。
+   独立类名而非复用 .hidden：全屏隐藏与「面板打开时按钮让位」是两种正交
+   状态，复用会在退出全屏时把面板错误地显示/隐藏。
+   visibility 而非 display:none —— 保留元素占位与过渡，避免闪烁。
+   ───────────────────────────────────────────────────────────────────── */
+#douyu-qmx-starter-button.qmx-fullscreen-hidden,
+#qmx-modal-container.qmx-fullscreen-hidden {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}

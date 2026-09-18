@@ -38,6 +38,8 @@ export const ControlPage = {
     injectionTarget: null, // 存储被注入的DOM元素引用
     isPanelInjected: false, // 标记是否成功进入注入模式
     modalContainer: null, // 新增：持有面板引用，防止DOM丢失后无法找回
+    /** 当前是否因全屏而隐藏；用于让 syncFullscreenVisibility 幂等 */
+    fullscreenHidden: false,
     stopLayoutObserver: null,
     
     /**
@@ -71,6 +73,7 @@ export const ControlPage = {
        setInterval(() => {
             this.renderDashboard();
             this.checkInjectionState(); // 新增：检查注入状态
+            this.syncFullscreenVisibility();
         }, 1000);
         // 显示首次使用提示
         FirstTimeNotice.showFirstUseNotice();
@@ -82,6 +85,14 @@ export const ControlPage = {
         window.addEventListener('resize', () => {
             this.correctButtonPosition();
             this.correctModalPosition();
+        });
+        /**
+         * 浏览器全屏（F11 / Fullscreen API）有标准事件，直接监听，
+         * 不必干等 1 秒轮询。斗鱼的**网页全屏**不发这个事件（它只切 body 类名），
+         * 所以那条路径仍依赖轮询 —— 两条都留着才覆盖完整。
+         */
+        ['fullscreenchange', 'webkitfullscreenchange'].forEach((type) => {
+            document.addEventListener(type, () => this.syncFullscreenVisibility());
         });
     },
 
@@ -100,6 +111,39 @@ export const ControlPage = {
                 this.applyModalMode();
             }
         }
+    },
+
+    /**
+     * 斗鱼「网页全屏」时隐藏插件 UI，退出全屏后恢复。
+     *
+     * 为什么轮询而不是监听事件：
+     * 斗鱼的网页全屏只切自己 body 上的类名，不发全屏事件 ——
+     * 没有可靠的 `fullscreenchange` 可用。已有的 1 秒轮询
+     * （renderDashboard / checkInjectionState）是最省事的挂载点，
+     * 人类感知不到 1 秒延迟，也避免再加一个 observer 拖慢页面。
+     *
+     * 用独立的 `qmx-fullscreen-hidden` 类而不是复用 `hidden` / `visible`：
+     * `hidden` 是「面板打开时按钮让位」的语义，`visible` 是「面板已展开」。
+     * 全屏隐藏是第三种正交状态（面板可能开着也可能关着），复用一个类
+     * 会在退出全屏时把面板错误地显示/隐藏。
+     *
+     * 幂等：只在状态变化时写 DOM，避免每 1 秒无谓触发样式重算与日志刷屏。
+     */
+    syncFullscreenVisibility() {
+        const hidden = DouyuLayoutAdapter.isFullscreen();
+        if (this.fullscreenHidden === hidden) return;
+        this.fullscreenHidden = hidden;
+
+        const targets = [
+            document.getElementById(SETTINGS.DRAGGABLE_BUTTON_ID),
+            document.getElementById('qmx-modal-container'),
+        ].filter(Boolean);
+        if (!targets.length) return;
+
+        targets.forEach((element) => {
+            element.classList.toggle('qmx-fullscreen-hidden', hidden);
+        });
+        Utils.log(hidden ? '[全屏] 已隐藏插件 UI。' : '[全屏] 已恢复插件 UI。');
     },
 
     /**

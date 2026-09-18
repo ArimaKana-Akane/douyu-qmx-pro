@@ -145,3 +145,79 @@ test('无抽奖记录时 lottery 汇总为零值（UI 据此隐藏抽奖卡片�
     assert.equal(summary.lottery.spent, 0);
     assert.deepEqual(summary.lottery.events, []);
 });
+
+// ── 星光棒总计（领取 + 抽奖，2026-09-18 用户要求）──────────────────────
+
+test('星光棒总计 = 领取所得 + 抽奖所得', () => {
+    storage.clear();
+    const now = Date.now();
+    // 领取两次：星光棒 5 + 15
+    ClaimEventStore.record({
+        timestamp: now - 3000, roomId: '100', bagId: 1, bagKey: '100:1', phase: 'claim',
+        result: 'success', source: 'snatch', rewards: { coins: 10, starlight: 5 },
+    });
+    ClaimEventStore.record({
+        timestamp: now - 2000, roomId: '200', bagId: 2, bagKey: '200:2', phase: 'claim',
+        result: 'success', source: 'snatch', rewards: { coins: 0, starlight: 15 },
+    });
+    // 抽奖一次：星光棒 770
+    ClaimEventStore.record({
+        timestamp: now - 1000, phase: 'lottery', result: 'success', source: 'lottery',
+        roomId: '6657', cost: 100, drawCount: 10, rewards: { coins: 5, starlight: 770 },
+    });
+
+    const summary = ClaimEventStore.summarize({ days: 7 });
+    assert.equal(summary.starlight.fromClaim, 20, '领取侧应累加 5+15');
+    assert.equal(summary.starlight.fromLottery, 770, '抽奖侧应为 770');
+    assert.equal(summary.starlight.total, 790, '总计应为 790');
+});
+
+test('星光棒总计只算成功事件，失败的不入账', () => {
+    storage.clear();
+    const now = Date.now();
+    ClaimEventStore.record({
+        timestamp: now - 2000, roomId: '100', bagId: 1, phase: 'claim',
+        result: 'success', source: 'snatch', rewards: { starlight: 10 },
+    });
+    // 失败的领取：即便带了 rewards 也不该计入
+    ClaimEventStore.record({
+        timestamp: now - 1500, roomId: '200', bagId: 2, phase: 'claim',
+        result: 'empty_or_failed', source: 'snatch', rewards: { starlight: 999 },
+    });
+    // 失败的抽奖：同理
+    ClaimEventStore.record({
+        timestamp: now - 1000, phase: 'lottery', result: 'unknown', source: 'lottery',
+        roomId: '6657', cost: 0, rewards: { starlight: 888 },
+    });
+
+    const summary = ClaimEventStore.summarize({ days: 7 });
+    assert.equal(summary.starlight.fromClaim, 10);
+    assert.equal(summary.starlight.fromLottery, 0);
+    assert.equal(summary.starlight.total, 10, '失败事件不应入账');
+});
+
+test('星光棒总计不因抽奖成本而减少（成本记在金币口径）', () => {
+    storage.clear();
+    const now = Date.now();
+    ClaimEventStore.record({
+        timestamp: now, phase: 'lottery', result: 'success', source: 'lottery',
+        roomId: '6657', cost: 100, drawCount: 10, rewards: { coins: 0, starlight: 50 },
+    });
+
+    const summary = ClaimEventStore.summarize({ days: 7 });
+    assert.equal(summary.starlight.total, 50, '总计不应被金币成本扣减');
+    assert.equal(summary.lottery.spent, 100, '成本仍在抽奖口径里');
+});
+
+test('无任何星光棒记录时总计为 0', () => {
+    storage.clear();
+    ClaimEventStore.record({
+        timestamp: Date.now(), roomId: '100', bagId: 1, phase: 'claim', result: 'success',
+        source: 'snatch', rewards: { coins: 20, starlight: 0 },
+    });
+
+    const summary = ClaimEventStore.summarize({ days: 7 });
+    assert.equal(summary.starlight.total, 0);
+    assert.equal(summary.starlight.fromClaim, 0);
+    assert.equal(summary.starlight.fromLottery, 0);
+});
