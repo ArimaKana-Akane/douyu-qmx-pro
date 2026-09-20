@@ -24,7 +24,7 @@ globalThis.GM_setValue = (key, value) => storage.set(key, value);
 globalThis.GM_log = () => {};
 globalThis.window = { dispatchEvent() {}, location: { href: 'https://www.douyu.com/6657' } };
 
-const { LotteryAutoRunner, TEN_DRAW_COST } = await import('./LotteryAutoRunner.js');
+const { LotteryAutoRunner, TEN_DRAW_COST, summarizeDrawPrizes } = await import('./LotteryAutoRunner.js');
 const { DouyuAPI, LOTTERY_ERROR } = await import('../../utils/DouyuAPI.js');
 
 /** 用可控的假实现替换 DouyuAPI 的两个方法 */
@@ -210,4 +210,84 @@ test('start() 立即检查一次，不等第一个轮询周期', async () => {
         DouyuAPI.getLotteryInfo = originalGetInfo;
         DouyuAPI.drawLottery = originalDraw;
     }
+});
+
+// ── 抽奖奖品折算（2026-09-18 修复）──────────────────────────────────────
+//
+// 背景：旧实现只读数字类型字段 prizeType/ptype，但**抽奖响应不含该字段**，
+// 只有 prizeDesc / prizeNum。于是 Number(undefined) === NaN，两类分支都不进，
+// 所有奖品折算成 0 —— 抽奖赢到的星光棒从未进入统计。
+//
+// 下面这组用例是**回归锁**：必须用真实响应形态（无 prizeType）驱动。
+// 旧测试之所以全绿，正是因为只断言「抽了奖」和奖品文本，从不验算出的数字。
+
+test('折算：真实抽奖响应（无 prizeType）也能算出星光棒', () => {
+    // 字段形态取自 docs/DOUYU_REDPACKET_API.md §4.3 记录的实测响应
+    const prizeList = [{ prizeDesc: '星光棒', prizeNum: 20, sort: 10, prizeIcon: 'x', ts: 1 }];
+    const r = summarizeDrawPrizes(prizeList);
+    assert.equal(r.starlight, 20, '无 prizeType 时必须能按文本认出星光棒');
+    assert.equal(r.coins, 0);
+});
+
+test('折算：十连混合奖品（真实形态）分别归到星光棒与金币', () => {
+    const prizeList = [
+        { prizeDesc: '星光棒', prizeNum: 500 },
+        { prizeDesc: '星光棒', prizeNum: 100 },
+        { prizeDesc: '星光棒', prizeNum: 10 },
+        { prizeDesc: '金币', prizeNum: 5 },
+    ];
+    const r = summarizeDrawPrizes(prizeList);
+    assert.equal(r.starlight, 610);
+    assert.equal(r.coins, 5);
+});
+
+test('折算：荧光棒是星光棒的别名，同样计入', () => {
+    const r = summarizeDrawPrizes([{ prizeDesc: '荧光棒', prizeNum: 30 }]);
+    assert.equal(r.starlight, 30);
+});
+
+test('折算：非数值奖励（皮肤/头像框/勋章）不计入任何一类', () => {
+    const r = summarizeDrawPrizes([
+        { prizeDesc: '弹幕皮肤', prizeNum: 1 },
+        { prizeDesc: '头像框', prizeNum: 1 },
+        { prizeDesc: '鉴星官勋章', prizeNum: 1 },
+    ]);
+    assert.equal(r.starlight, 0);
+    assert.equal(r.coins, 0);
+});
+
+test('折算：数字类型存在时优先于文本（红包路径不受影响）', () => {
+    // 即便文本写着星光棒，数字类型说金币就以数字为准 —— 数字是服务端的结构化字段
+    const r = summarizeDrawPrizes([{ prizeDesc: '星光棒', prizeNum: 7, prizeType: 9 }]);
+    assert.equal(r.coins, 7);
+    assert.equal(r.starlight, 0);
+});
+
+test('折算：认不出的描述宁可漏计，不错记成另一种货币', () => {
+    const r = summarizeDrawPrizes([{ prizeDesc: '神秘大奖', prizeNum: 999 }]);
+    assert.equal(r.starlight, 0);
+    assert.equal(r.coins, 0);
+});
+
+test('折算：数量非正或缺失时跳过，不产生 NaN', () => {
+    const r = summarizeDrawPrizes([
+        { prizeDesc: '星光棒', prizeNum: 0 },
+        { prizeDesc: '星光棒' },
+        null,
+        undefined,
+    ]);
+    assert.equal(r.starlight, 0);
+    assert.equal(Number.isNaN(r.starlight), false);
+});
+
+test('抽奖成功后写入统计的 rewards 含星光棒（端到端串起来）', async () => {
+    // 这条连接「折算」与「写事件」：确保折算结果真的进了 ClaimEventStore
+    const r = await withApi({
+        getLotteryInfo: async () => ({ myCoin: 100, remainLotteryNum: 160 }),
+        drawLottery: async () => ({
+            prizeList: [{ prizeDesc: '星光棒', prizeNum: 500 }, { prizeDesc: '星光棒', prizeNum: 100 }],
+        }),
+    }, () => LotteryAutoRunner.tick());
+    assert.equal(r.action, 'drawn');
+    assert.match(r.prizeText, /星光棒×500/);
 });

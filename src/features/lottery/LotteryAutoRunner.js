@@ -99,21 +99,51 @@ const formatPrizes = (prizeList) => (Array.isArray(prizeList) ? prizeList : [])
 /**
  * 把奖池折算成「金币 / 星光棒」两类总量。
  *
- * 与红包共用同一套类型编码（实测自活动配置 `treasureRewards`）：
- *   prizeType 9 = 金币，2 = 星光棒，其余（弹幕皮肤/头像框/勋章等）不计入数值统计。
- * 口径必须与 `RedBagState.summarizePrizePool` 一致，否则「收益趋势」里的
- * 金币/星光棒会把同一类奖励算成两种东西。
+ * 类型编码与红包共用：9 = 金币，2 = 星光棒，其余（弹幕皮肤/头像框/勋章等）
+ * 不计入数值统计。口径必须与 RedBagState.summarizePrizePool 一致，
+ * 否则「收益趋势」会把同一类奖励算成两种东西。
  *
- * 注意抽奖返回的字段名是 `prizeNum`（领取红包用的是 `num`），
- * 而 `prizeType` 在部分响应里缺省，因此两处都读。
+ * ⚠️ 关键：抽奖响应**不含 `prizeType`/`ptype`**，只有 `prizeDesc`/`prizeNum`。
+ * 实测自本文档 §4.3 记录的真实响应：
+ *   { "prizeDesc": "星光棒", "prizeNum": 20, "sort": 10, "prizeIcon": "...", "ts": ... }
+ * 而红包响应才有 `ptype`。旧实现只读数字类型字段，于是
+ *   Number(undefined) === NaN → 两个分支都不进 → 全部奖品折算成 0。
+ * 后果：抽奖赢到的星光棒从未进入统计，「星光棒总计」长期偏低，
+ * 而「抽奖净收益」显示成「只有成本没有收入」的负数。
+ *
+ * 因此这里用**数字类型优先、文本名称兜底**：
+ * - 数字类型存在且可识别时以它为准（红包路径不受影响）；
+ * - 缺失时按 `prizeDesc` 文本判断。文本是服务端下发的展示名，
+ *   比「猜一个数字编码」可靠，且抽奖奖励表只有星光棒与金币两类数值奖励。
+ * - 认不出来的一律不计入（宁可漏计也不错计成另一种货币）。
  */
+const PRIZE_TYPE_COIN = 9;
+const PRIZE_TYPE_STARLIGHT = 2;
+
+/** 从奖品描述文本判断数值类型；认不出返回 null（不计入）。 */
+const classifyPrizeByText = (desc) => {
+    const text = String(desc || '');
+    if (!text) return null;
+    // 星光棒在不同位置也叫「荧光棒」，两者都认。
+    if (text.includes('星光棒') || text.includes('荧光棒')) return PRIZE_TYPE_STARLIGHT;
+    if (text.includes('金币')) return PRIZE_TYPE_COIN;
+    return null;
+};
+
 export const summarizeDrawPrizes = (prizeList) => (Array.isArray(prizeList) ? prizeList : [])
     .reduce((acc, prize) => {
         const amount = toNumber(prize?.prizeNum ?? prize?.num);
-        const prizeType = Number(prize?.prizeType ?? prize?.ptype);
         if (amount <= 0) return acc;
-        if (prizeType === 9) acc.coins += amount;
-        else if (prizeType === 2) acc.starlight += amount;
+
+        // 数字类型优先；缺失或无法识别时退回文本判据。
+        const rawType = prize?.prizeType ?? prize?.ptype;
+        const numericType = Number(rawType);
+        const prizeType = Number.isFinite(numericType) && rawType !== undefined && rawType !== null
+            ? numericType
+            : classifyPrizeByText(prize?.prizeDesc ?? prize?.name);
+
+        if (prizeType === PRIZE_TYPE_COIN) acc.coins += amount;
+        else if (prizeType === PRIZE_TYPE_STARLIGHT) acc.starlight += amount;
         return acc;
     }, { coins: 0, starlight: 0 });
 

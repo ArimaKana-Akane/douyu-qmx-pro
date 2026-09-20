@@ -73,7 +73,8 @@ const summarizeLottery = (events) => {
  * 口径约定：
  * - 只统计 `result === "success"` 的事件（失败的领取/抽奖没有星光棒入账）；
  * - **不扣抽奖成本**：抽奖消耗的是金币，与星光棒不是同一种货币，
- *   从星光棒总量里减去金币没有意义。需要看收支关系看 `lottery.spent` 与净收益。
+ *   从星光棒总量里减去金币没有意义。「抽奖净收益」那张混算卡已按用户要求移除，
+ *   金币支出看日志即可。
  *
  * @param {Array} events 已按时间范围过滤过的事件列表
  * @returns {{ total: number, fromClaim: number, fromLottery: number }}

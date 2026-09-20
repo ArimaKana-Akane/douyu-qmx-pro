@@ -343,28 +343,23 @@ export const StatsInfo = {
             },
         ];
         /**
-         * 抽奖两卡：次数与净收益。
+         * 抽奖次数卡。
          *
          * 用**抽奖次数**而不是奖品条目数：一次十连会返回多条 prizeList，
          * 用条目数会显示成 10 次，与「抽了 1 次十连」的直觉不符。
          *
-         * 净收益 = 抽到的星光棒 + 抽到的金币 − 消耗金币。抽奖是**支出**行为
-         * （十连固定扣 100 金币），只显示「抽到多少」会让人误以为全是收入，
-         * 因此必须把成本扣掉，负数说明这一轮亏了。
+         * 已移除「抽奖净收益」卡（用户要求）：它把**金币成本**与
+         * **星光棒收益**放在同一个数字里相减，两种货币不可通约，
+         * 结果是一个既不是金币也不是星光棒的混合量。要看星光棒收入
+         * 请看「星光棒总计」（已包含抽奖所得）；要看金币支出请看日志。
          *
-         * 只在确实有抽奖记录时才追加：没有记录的账号不该看到两张 0 卡片。
+         * 只在确实有抽奖记录时才追加：没有记录的账号不该看到 0 卡片。
          */
         if (lottery && lottery.count > 0) {
-            const net = lottery.starlight + lottery.coins - lottery.spent;
             cards.push({
                 value: lottery.count,
                 label: state.period === 'weekly' ? '4周抽奖次数' : '7天抽奖次数',
                 tone: 'success',
-            });
-            cards.push({
-                value: `${net > 0 ? '+' : ''}${formatNumber(net)}`,
-                label: '抽奖净收益',
-                tone: net >= 0 ? 'coin' : 'warning',
             });
         }
         container.innerHTML = cards.map((card) => `
